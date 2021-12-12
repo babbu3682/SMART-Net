@@ -1,5 +1,7 @@
 # MRI-Net
-It's scheduled to be uploaded soon.
+It's scheduled to be uploaded soon. We are modifying the code for easier use.
+
+
 ![image](https://user-images.githubusercontent.com/48959435/145704189-f68032cd-481f-4395-998f-877836df5f8e.png)
 Fig. 2. Schematic overview of MRI-Net. Our model is composed of upstream and downstream tasks; a) A upstream task is a 2D-based representation learning process using MTL (classification, segmentation, reconstruction, and consistency). A downstream task is a process of extending to volume-level ICH tasks by the transfer learning using the pre-trained encoder in the upstream. b) A pre-trained feature extractor and an LSTM-based classifier are combined to perform volume-level classification. c) The pre-trained feature extractor and the Conv3D-based segmentor are combined to perform volume-level segmentation.
 
