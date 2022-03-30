@@ -4,19 +4,16 @@ import sys
 # sys.path.append(os.path.abspath('/workspace/sunggu/MONAI'))
 # sys.path.append(os.path.abspath('/workspace/sunggu/1.Hemorrhage'))
 # sys.path.append(os.path.abspath('/workspace/sunggu/1.Hemorrhage/utils/FINAL_utils'))
-
-import monai
+from pathlib import Path
 import argparse
 import datetime
 import numpy as np
 import time
 import torch
-import torch.backends.cudnn as cudnn
 import json
 import random
 import functools
 
-from pathlib import Path
 
 import utils
 from create_model import create_model
@@ -144,10 +141,7 @@ np.random.seed(random_seed)
 random.seed(random_seed)
 
 def main(args):
-    
-    if (args.multi_gpu_mode):
-        utils.init_distributed_mode(args)
-       
+           
     utils.print_args(args)
     device = torch.device(args.device)
 

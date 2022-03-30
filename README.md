@@ -58,14 +58,13 @@ We conducted upstream training with three multi-task including classificatiom, s
 We conducted downstream training using multi-task representation.
 
 
-
 ## Upstream visualize
 ### 1. Grad-CAM and activation map
 
-
 ### 2. t-SNE
 
-
+## Excuse
+For personal information security reasons of medical data, our data cannot be disclosed.
 
 
 ## Citation

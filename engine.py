@@ -13,6 +13,17 @@ from monai.metrics.utils import MetricReduction, do_metric_reduction
 from monai.metrics import compute_meandice, compute_roc_auc, DiceMetric, ConfusionMatrixMetric 
 from sklearn.metrics import roc_auc_score, f1_score    
 
+def freeze_params(model: torch.nn.Module):
+    """Set requires_grad=False for each of model.parameters()"""
+    for par in model.parameters():
+        par.requires_grad = False
+
+def unfreeze_params(model: torch.nn.Module):
+    """Set requires_grad=True for each of model.parameters()"""
+    for par in model.parameters():
+        par.requires_grad = True
+
+
 activation = {}
 def get_activation(name):
     def hook(model, input, output):
@@ -295,6 +306,21 @@ def train_Downtask_3dCls(model, criterion, data_loader, optimizer, device, epoch
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
     
+    # Gradual Unfreezing
+    # 10 epoch 씩 one stage block 풀기, 100 epoch까지는 아예 고정
+    if epoch <= 100:
+        freeze_params(model)
+    elif epoch >= 111:
+        unfreeze_params(model)
+    elif epoch >= 121:
+        unfreeze_params(model)
+    elif epoch >= 131:
+        unfreeze_params(model)        
+    elif epoch >= 141:
+        unfreeze_params(model)
+    else :
+        unfreeze_params(model)
+
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
         inputs  = batch_data["image"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
@@ -629,7 +655,6 @@ def train_Downtask_3dSeg(model, criterion, data_loader, optimizer, device, epoch
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
-
 def valid_Downtask_3dSeg(model, criterion, data_loader, device):
     metric_logger = utils.MetricLogger(delimiter="  ")
     header = 'Valid:'
