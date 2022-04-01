@@ -5,14 +5,12 @@ Misc functions, including distributed helpers.
 
 Mostly copy-paste from torchvision references.
 """
-import io
-import os
+
+import numpy as np
 import time
 from collections import defaultdict, deque
 import datetime
-
 import torch
-import torch.distributed as dist
 
 
 class SmoothedValue(object):
@@ -29,22 +27,10 @@ class SmoothedValue(object):
         self.fmt = fmt
 
     def update(self, value, n=1):
+        # n is batch_size
         self.deque.append(value)
         self.count += n
         self.total += value * n
-
-    def synchronize_between_processes(self):
-        """
-        Warning: does not synchronize the deque!
-        """
-        if not is_dist_avail_and_initialized():
-            return
-        t = torch.tensor([self.count, self.total], dtype=torch.float64, device='cuda')
-        dist.barrier()
-        dist.all_reduce(t)
-        t = t.tolist()
-        self.count = int(t[0])
-        self.total = t[1]
 
     @property
     def median(self):
@@ -76,18 +62,18 @@ class SmoothedValue(object):
             max=self.max,
             value=self.value)
 
-
 class MetricLogger(object):
-    def __init__(self, delimiter="\t"):
+    def __init__(self, delimiter="\t", n=1):
         self.meters = defaultdict(SmoothedValue)
-        self.delimiter = delimiter
+        self.delimiter  = delimiter
+        self.n = n
 
     def update(self, **kwargs):
         for k, v in kwargs.items():
             if isinstance(v, torch.Tensor):
                 v = v.item()
             assert isinstance(v, (float, int))
-            self.meters[k].update(v)
+            self.meters[k].update(value=v, n=self.n)
 
     def __getattr__(self, attr):
         if attr in self.meters:
@@ -105,9 +91,6 @@ class MetricLogger(object):
             )
         return self.delimiter.join(loss_str)
 
-    def synchronize_between_processes(self):
-        for meter in self.meters.values():
-            meter.synchronize_between_processes()
 
     def add_meter(self, name, meter):
         self.meters[name] = meter
@@ -159,83 +142,25 @@ class MetricLogger(object):
             header, total_time_str, total_time / len(iterable)))
 
 
-def _load_checkpoint_for_ema(model_ema, checkpoint):
-    """
-    Workaround for ModelEma._load_checkpoint to accept an already-loaded object
-    """
-    mem_file = io.BytesIO()
-    torch.save(checkpoint, mem_file)
-    mem_file.seek(0)
-    model_ema._load_checkpoint(mem_file)
 
 
-def setup_for_distributed(is_master):
-    """
-    This function disables printing when not in master process
-    """
-    import builtins as __builtin__
-    builtin_print = __builtin__.print
 
-    def print(*args, **kwargs):
-        force = kwargs.pop('force', False)
-        if is_master or force:
-            builtin_print(*args, **kwargs)
-
-    __builtin__.print = print
-
-
-def is_dist_avail_and_initialized():
-    if not dist.is_available():
-        return False
-    if not dist.is_initialized():
-        return False
-    return True
-
-
-def get_world_size():
-    if not is_dist_avail_and_initialized():
-        return 1
-    return dist.get_world_size()
-
-
-def get_rank():
-    if not is_dist_avail_and_initialized():
-        return 0
-    return dist.get_rank()
-
-
-def is_main_process():
-    return get_rank() == 0
-
-
-def save_on_master(*args, **kwargs):
-    if is_main_process():
-        torch.save(*args, **kwargs)
-
-
-def init_distributed_mode(args):
-    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        args.rank = int(os.environ["RANK"])
-        args.world_size = int(os.environ['WORLD_SIZE'])
-        args.gpu = int(os.environ['LOCAL_RANK'])
-    elif 'SLURM_PROCID' in os.environ:
-        args.rank = int(os.environ['SLURM_PROCID'])
-        args.gpu = args.rank % torch.cuda.device_count()
-    else:
-        print('Not using distributed mode')
-        args.distributed = False
-        return
-
-    args.distributed = True
-
-    torch.cuda.set_device(args.gpu)
-    args.dist_backend = 'nccl'
-    
-    print('| distributed init (rank {}): {}'.format(args.rank, args.dist_url), flush=True)
-
-    torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url, world_size=args.world_size, rank=args.rank)
-    torch.distributed.barrier()
-    setup_for_distributed(args.rank == 0)
+def to_tensor(x, dtype=None) -> torch.Tensor:
+    if isinstance(x, torch.Tensor):
+        if dtype is not None:
+            x = x.type(dtype)
+        return x
+    if isinstance(x, np.ndarray):
+        x = torch.from_numpy(x)
+        if dtype is not None:
+            x = x.type(dtype)
+        return x
+    if isinstance(x, (list, tuple)):
+        x = np.array(x)
+        x = torch.from_numpy(x)
+        if dtype is not None:
+            x = x.type(dtype)
+        return x
 
 
 def print_args(args):

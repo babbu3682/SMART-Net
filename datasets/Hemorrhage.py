@@ -241,10 +241,10 @@ def pad_collate_fn(batch):
 
 # Dataset
     ## Up Task
-def Hemo_Uptask_Dataset(mode):
+def Hemo_Uptask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/samples"):
     if mode == 'train':
-        img_list     = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Train_nii/*_img.nii.gz"))
-        label_list   = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Train_nii/*_mask.nii.gz"))
+        img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_img.nii.gz"))
+        label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_mask.nii.gz"))
         data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]        
 
         print("Train [Total]  number = ", len(img_list))
@@ -278,8 +278,8 @@ def Hemo_Uptask_Dataset(mode):
         )   
 
     else :
-        img_list     = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Valid_nii/*_img.nii.gz"))
-        label_list   = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Valid_nii/*_mask.nii.gz"))
+        img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/valid/*_img.nii.gz"))
+        label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/valid/*_mask.nii.gz"))
         data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]
 
         print("Valid [Total]  number = ", len(img_list))
@@ -310,10 +310,10 @@ def Hemo_Uptask_Dataset(mode):
     return Dataset(data=data_dicts, transform=transforms), default_collate_fn
 
     ## Down Task
-def Hemo_Downtask_Dataset(mode):
+def Hemo_Downtask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/samples"):
     if mode == 'train':
-        img_list     = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Train_nii/*_img.nii.gz"))
-        label_list   = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Train_nii/*_mask.nii.gz"))
+        img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_img.nii.gz"))
+        label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_mask.nii.gz"))
         data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]        
 
         print("Train [Total]  number = ", len(img_list))
@@ -346,8 +346,8 @@ def Hemo_Downtask_Dataset(mode):
         )        
 
     else :
-        img_list     = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Valid_nii/*_img.nii.gz"))
-        label_list   = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Valid_nii/*_mask.nii.gz"))
+        img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/valid/*_img.nii.gz"))
+        label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/valid/*_mask.nii.gz"))
         data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]
 
         print("Valid [Total]  number = ", len(img_list))
@@ -379,10 +379,10 @@ def Hemo_Downtask_Dataset(mode):
 
 
 # TEST
-def Hemo_TEST_Dataset(test_dataset):
-    if test_dataset == 'Custom':
-        img_list     = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Test_nii/Asan_internal/*_img.nii.gz"))
-        label_list   = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Test_nii/Asan_internal/*_mask.nii.gz"))
+def Hemo_TEST_Dataset(test_dataset_name, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/samples"):
+    if test_dataset_name == 'Custom':
+        img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/test/*_img.nii.gz"))
+        label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/test/*_mask.nii.gz"))
         data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]
 
         print("Test [Total]  number = ", len(img_list))
@@ -409,36 +409,6 @@ def Hemo_TEST_Dataset(test_dataset):
                 ToTensord(keys=["image", "label"]),
             ]
         )
-
-
-    elif test_dataset == 'Physionet':
-        img_list     = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Test_nii/Physionet_external/Images/*.nii"))
-        label_list   = list_sort_nicely(glob.glob("/workspace/sunggu/1.Hemorrhage/dataset/Test_nii/Physionet_external/Labels/*.nii"))
-        data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]
-
-        print("Test [Total]  number = ", len(img_list))
-
-        transforms = Compose(
-            [
-                # Load nii data
-                LoadImaged(keys=["image", "label"]),
-                AddChanneld(keys=["image", "label"]),
-                Orientationd(keys=["image", "label"], axcodes="PLS"),
-
-                # Pre-processing
-                ScaleIntensityRanged(keys=["image"], a_min=0.0, a_max=80.0, b_min=0.0, b_max=1.0, clip=True),                     # Windowing HU [min:0, max:80]
-                Filter_Zero_Depths,                                                                                               # Remove the empty slice
-                Lambdad(keys=["image"], func=functools.partial(resize_keep_depths, size=256, mode='image')),                      # Resize Image                
-                Lambdad(keys=["label"], func=functools.partial(resize_keep_depths, size=256, mode='label')),                      # Resize Label                                
-                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast
-                Lambdad(keys=["label"], func=functools.partial(delete_too_small_noise_keep_depths, min_size=3, connectivity=2)),  # Noise Reduction
-                                
-                # Normalize
-                Lambdad(keys=["image"], func=functools.partial(minmax_normalize, option=False)),
-                ToTensord(keys=["image", "label"]),
-            ]
-        )
-
 
     else :
         raise Exception('Error, Dataset name')        

@@ -1,54 +1,70 @@
 # SMART-Net - Official Pytorch Implementation
 
 It's scheduled to be uploaded soon. We are modifying the code for easier use.
-We have built a set of pre-trained models called <b>Generic Autodidactic Models</b>, nicknamed <b>Models Genesis</b>, because they are created <i>ex nihilo</i> (with no manual labeling), self-taught (learned by self-supervision), and generic (served as source models for generating application-specific target models). We envision that Models Genesis may serve as a primary source of transfer learning for 3D medical imaging applications, in particular, with limited annotated data. 
+We proposed a supervised multi-task aiding representation transfer learning network called <b>SMART-Net</b>.
 
-<p align="center"><img width="100%" src="figures/patch_generator.png" /></p>
-<p align="center"><img width="85%" src="figures/framework.png" /></p>
+
+## Highlights
++ Develop a robust feature extractor of brain hemorrhage in head & neck NCCT through three kinds of
+multi-task representation learning.
++ Propose the consistency loss to alleviate the disparity of two pretext tasks' heads, resulting in
+improved transferability and representation.
+Connect the feature extractor with the target-specific 3D operator via transfer learning to expand
+volume-level tasks.
++ Explore relationships of the proposed multi-pretext task combinations and perform ablation studies on
+optimal 3D operators for volume-level ICH tasks.
++ Validate the model on multiple datasets with previous methods and ablation studies for the robustness
+and practicality of our method.
+Highlights
+
+
+<p align="center"><img width="100%" src="figures/graphical_abstract.png" /></p>
+<!-- <p align="center"><img width="85%" src="figures/framework.png" /></p> -->
 
 ## Paper
-This repository provides the official implementation of training Models Genesis as well as the usage of the pre-trained Models Genesis in the following paper:
+This repository provides the official implementation of training SMART-Net as well as the usage of the pre-trained SMART-Net in the following paper:
 
-<b>Models Genesis</b> <br/>
-[Zongwei Zhou](https://www.zongweiz.com/)<sup>1</sup>, [Vatsal Sodha](https://github.com/vatsal-sodha)<sup>1</sup>, [Jiaxuan Pang](https://github.com/MRJasonP)<sup>1</sup>, [Michael B. Gotway](https://www.mayoclinic.org/biographies/gotway-michael-b-m-d/bio-20055566)<sup>2</sup>, and [Jianming Liang](https://chs.asu.edu/jianming-liang)<sup>1</sup> <br/>
+<b>Improved performance and robustness of multi-task representation learning with consistency loss between pretexts for intracranial hemorrhage identification in head CT</b> <br/>
+[Sunggu Kyung](https://github.com/babbu3682)<sup>1</sup>, Keewon Shina, Hyunsu Jeongb, Ki Duk Kimb, Jooyoung Parka, Kyungjin Choa, Jeong Hyun Leec, Gil-Sun Hongc, and Namkug Kim <br/>
 <sup>1 </sup>Arizona State University,   <sup>2 </sup>Mayo Clinic <br/>
-Medical Image Analysis (MedIA) <br/>
-<b>[MedIA Best Paper Award](http://www.miccai.org/about-miccai/awards/medical-image-analysis-best-paper-award/)</b>  <br/>
-[paper](https://arxiv.org/pdf/2004.07882.pdf) | [code](https://github.com/MrGiovanni/ModelsGenesis) | [slides](https://d5b3ebbb-7f8d-4011-9114-d87f4a930447.filesusr.com/ugd/deaea1_5ecdfa48836941d6ad174dcfbc925575.pdf) | [graphical abstract](https://ars.els-cdn.com/content/image/1-s2.0-S1361841520302048-fx1_lrg.jpg)
+<b>(Under revision...)</b> Medical Image Analysis (MedIA) <br/>
+<!-- [paper](https://arxiv.org/pdf/2004.07882.pdf) | [code](https://github.com/babbu3682/SMART-Net) | [graphical abstract](https://ars.els-cdn.com/content/image/1-s2.0-S1361841520302048-fx1_lrg.jpg) -->
+[code](https://github.com/babbu3682/SMART-Net)
 
 
 ## Requirements
 + Linux
-+ Python 3.7.5
-+ PyTorch 1.3.1
++ Python 3.8.5
++ PyTorch 1.8.0
 
 
 ## SMART-Net Framework
 ### 1. Clone the repository and install dependencies
 ```bash
-$ git clone https://github.com/fhaghighi/TransVW.git
-$ cd TransVW/
+$ git clone https://github.com/babbu3682/SMART-Net.git
+$ cd SMART-Net/
 $ pip install -r requirements.txt
 ```
 
-### 2. Download the pre-trained TransVW
-Download the pre-trained TransVW as following and save into `./pytorch/Checkpoints/en_de/TransVW_chest_ct.pt` directory.
+### 2. Preparing data
 
-<table><tbody>
-<!-- START TABLE -->
-<!-- TABLE HEADER -->
-<th valign="bottom"></th>
-<th valign="bottom">Backbone</th>
-<th valign="bottom">Platform</th>
-<th valign="bottom">model</th>
+#### For your convenience, we have provided a few 3D nii samples from AMC dataset as well as their mask labels.
+Download the data from [this repository](https://zenodo.org/record/4625321/files/TransVW_data.zip?download=1). We have provided the training and validation samples for C=50 classes of visual words. For each instance of a visual word, we have extracted 3 multi-resolution cubes from each patient, where each of the three resolutions are saved in files named as 'train_dataN_vwGen_ex_ref_fold1.0.npy',  *N*=1,2,3. For each 'train_dataN_vwGen_ex_ref_fold1.0.npy' file, there is a corresponding 'train_labelN_vwGen_ex_ref_fold1.0.npy' file, which contains the pseudo labels of the discovered visual words.  
 
-<!-- TABLE BODY -->
-<tr><td align="left">TransVW</td>
-<td align="center"><a href="https://github.com/ellisdg/3DUnetCNN">U-Net 3D</a></td>
-<td align="center">Pytorch</td>
-<td align="center"><a href="https://zenodo.org/record/4625321/files/TransVW_chest_ct.pt?download=1">download</a></td>
-</tr>
-</tbody></table>
+
+- The processed anatomical patterns directory structure
+```
+TransVW_data/
+    |--  train_data1_vwGen_ex_ref_fold1.0.npy  : training data - resolution 1
+    |--  train_data2_vwGen_ex_ref_fold1.0.npy  : training data - resolution 2
+    |--  train_data3_vwGen_ex_ref_fold1.0.npy  : training data - resolution 3
+    |--  val_data1_vwGen_ex_ref_fold1.0.npy    : validation data
+    |--  train_label1_vwGen_ex_ref_fold1.0.npy : training labels - resolution 1
+    |--  train_label2_vwGen_ex_ref_fold1.0.npy : training labels - resolution 2
+    |--  train_label3_vwGen_ex_ref_fold1.0.npy : training labels - resolution 3
+    |--  val_label1_vwGen_ex_ref_fold1.0.npy   : validation labels
+   
+```
 
 ### 3. Upstream
 We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.

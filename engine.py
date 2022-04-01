@@ -1,17 +1,14 @@
 import math
-from pathlib import Path
-from typing import Iterable, Optional
-
 import utils
-import torch
-
 import numpy as np
+import torch
 import cv2
 
-import monai
-from monai.metrics.utils import MetricReduction, do_metric_reduction
-from monai.metrics import compute_meandice, compute_roc_auc, DiceMetric, ConfusionMatrixMetric 
-from sklearn.metrics import roc_auc_score, f1_score    
+from metrics import *
+
+
+
+
 
 def freeze_params(model: torch.nn.Module):
     """Set requires_grad=False for each of model.parameters()"""
@@ -22,6 +19,24 @@ def unfreeze_params(model: torch.nn.Module):
     """Set requires_grad=True for each of model.parameters()"""
     for par in model.parameters():
         par.requires_grad = True
+
+def predict(self, x):
+    """Inference method. Switch model to `eval` mode, call `.forward(x)` with `torch.no_grad()`
+
+    Args:
+        x: 4D torch tensor with shape (batch_size, channels, height, width)
+
+    Return:
+        prediction: 4D torch tensor with shape (batch_size, classes, height, width)
+
+    """
+    if self.training:
+        self.eval()
+
+    with torch.no_grad():
+        x = self.forward(x)
+
+    return x
 
 
 activation = {}
@@ -36,6 +51,7 @@ def get_features(name):
         features[name] = output.detach()
     return hook
 
+
 def Activation_Map(x):
     mean = torch.mean(x, dim=1)
     mean = torch.sigmoid(mean).squeeze().cpu().detach().numpy()
@@ -43,28 +59,25 @@ def Activation_Map(x):
     return mean
 
 
-dice_metric    = DiceMetric(include_background=True, reduction="mean_batch")
-confuse_metric = ConfusionMatrixMetric(include_background=True, compute_sample=False, reduction='mean')
-
-
-######################################################                    Uptask Task                         ########################################################
-def train_Uptask_CLS_SEG_REC(model, criterion, data_loader, optimizer, device, epoch):
+########################################################
+# Uptask Task
+    # SMART_Net
+def train_Up_SMART_Net(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size):
     # 2d slice-wise based Learning...! 
     model.train(True)
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 100
     
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        inputs  = batch_data["image"].squeeze(4).to(device)     # (B, C, H, W, 1) ---> (B, C, H, W)
-        seg_gt  = batch_data["label"].squeeze(4).to(device)     # (B, C, H, W, 1) ---> (B, C, H, W)
-        cls_gt  = seg_gt.flatten(1).bool().any(dim=1).float().unsqueeze(1) #    ---> (B, 1)
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
 
-        seg_pred, cls_pred, rec_pred = model(inputs)
+        cls_pred, seg_pred, rec_pred = model(inputs)
 
-        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt,  rec_gt=inputs)
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -81,39 +94,24 @@ def train_Uptask_CLS_SEG_REC(model, criterion, data_loader, optimizer, device, e
         
     # Gather the stats from all processes
     print("Averaged stats:", metric_logger)
-
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-# Evaluation code 
 @torch.no_grad()
-def valid_Uptask_CLS_SEG_REC(model, criterion, data_loader, device):
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'Valid:'
-
-    # switch to evaluation mode
+def valid_Up_SMART_Net(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
     model.eval()
-    print_freq = 10
-    metric_count = metric_sum = 0
-
-    total_cls_pred  = torch.tensor([], dtype=torch.float32, device='cpu')
-    total_cls_gt    = torch.tensor([], dtype=torch.float32, device='cpu')
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'Valid:'
 
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        inputs  = batch_data["image"].to(device)   
-        seg_gt  = batch_data["label"]              
-        cls_gt  = torch.stack([ seg_gt[..., i].flatten(1).bool().any(dim=1).float() for i in range(seg_gt.shape[-1]) ], dim=0) #    ---> (B, 1)
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
 
-        with torch.no_grad():
-            seg_pred  = torch.stack([ model(inputs[..., i])[0].detach().cpu() for i in range(inputs.shape[-1]) ], dim = -1)
-            cls_pred  = torch.stack([ model(inputs[..., i])[1].detach().cpu() for i in range(inputs.shape[-1]) ], dim = 0).flatten(1)
-            rec_pred  = torch.stack([ model(inputs[..., i])[2].detach().cpu() for i in range(inputs.shape[-1]) ], dim = -1)
+        cls_pred, seg_pred, rec_pred = model(inputs)
 
-
-        total_cls_pred  = torch.cat([total_cls_pred,  torch.sigmoid(cls_pred)],   dim=0)
-        total_cls_gt    = torch.cat([total_cls_gt,    cls_gt],     dim=0)
-
-        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs.detach().cpu())
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -124,211 +122,805 @@ def valid_Uptask_CLS_SEG_REC(model, criterion, data_loader, device):
         if loss_detail is not None:
             metric_logger.update(**loss_detail)
 
-        # Metrics
-        value, not_nans = dice_metric(y_pred=torch.sigmoid(seg_pred), y=seg_gt)
-        metric_count   += not_nans
-        metric_sum     += value * not_nans
+        # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+        seg_pred = torch.sigmoid(seg_pred)
+
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
   
-    # Metric SEG
-    Dice = (metric_sum / metric_count).item()
-    
-    # Metric CLS
-    AUC = roc_auc_score(total_cls_gt, total_cls_pred)
-    f1  = f1_score(y_true=total_cls_gt, y_pred=total_cls_pred.round())
+        # Metrics REC
+        mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
+        metric_logger.update(mae=mae)
 
-    confuse_result      = confuse_metric(y_pred=total_cls_pred.round(), y=total_cls_gt)
-    confusion_matrix, _ = do_metric_reduction(confuse_result, MetricReduction.SUM)
-
-    TP = confusion_matrix[0].item()
-    FP = confusion_matrix[1].item()
-    TN = confusion_matrix[2].item()
-    FN = confusion_matrix[3].item()
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
     
-    Acc = (TP+TN) / (TP+FP+TN+FN)
-    Sen = TP / (TP+FN)
-    Spe = TN / (TN+FP)
-    
-    print('* Loss:{losses.global_avg:.3f} | F1:{F1:.3f} AUC:{AUC:.3f} Acc:{acc:.3f} Sen:{sen:.3f} Spe:{spe:.3f} | Dice:{dice:.3f} '.format(losses=metric_logger.loss, F1=f1, AUC=AUC, acc=Acc, sen=Sen, spe=Spe, dice=Dice))
-    # return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    return {'loss': metric_logger.loss.global_avg, 'F1':f1, 'AUC': AUC, 'Acc': Acc, 'Sen': Sen, 'Spe': Spe, 'Dice': Dice}
-
-# test code 
 @torch.no_grad()
-def test_Uptask_CLS_SEG_REC(model, criterion, data_loader, device, test_name, save_path):
-    metric_logger = utils.MetricLogger(delimiter="  ")
+def test_Up_SMART_Net(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
     header = 'TEST:'
 
-    # switch to evaluation mode
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
+
+        cls_pred, seg_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+        seg_pred = torch.sigmoid(seg_pred)
+
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
+  
+        # Metrics REC
+        mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
+        metric_logger.update(mae=mae)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+     
+@torch.no_grad()
+def test_Up_SMART_Net_Patient_Level(model, criterion, data_loader, device, print_freq, batch_size):
+    # 3d patient-level evaluate...! 
     model.eval()
-    print_freq = 10
-    metric_count = metric_sum = 0
-    FalsePositive = 0
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'TEST:'
 
-    total_cls_pred  = torch.tensor([], dtype=torch.float32, device='cpu')
-    total_cls_gt    = torch.tensor([], dtype=torch.float32, device='cpu')
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
 
-    total_seg_pred  = torch.tensor([], dtype=torch.float32, device='cpu')
-    total_seg_gt    = torch.tensor([], dtype=torch.float32, device='cpu')
+        seg_pred  = torch.stack([ model(inputs[..., i])[1].detach().cpu() for i in range(inputs.shape[-1]) ], dim = -1)
 
-    # img_list      = []
-    # mask_list     = []
-    # label_list    = []
-    # seg_prob_list = []
-    # cls_prob_list = []
-    # save_dict = dict()
-    # activation_list = []
-    # D_activation_list = []
+        loss, loss_detail = criterion(seg_pred=seg_pred, seg_gt=seg_gt)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        seg_pred = torch.sigmoid(seg_pred)
+
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+    # Dual
+        # CLS+SEG
+def train_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size):
+    # 2d slice-wise based Learning...! 
+    model.train(True)
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
     
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        inputs  = batch_data["image"].to(device)     # (B, C, H, W, 1) ---> (B, C, H, W)
-        seg_gt  = batch_data["label"]                # (B, C, H, W, 1) ---> (B, C, H, W)        
-        cls_gt  = torch.stack([ seg_gt[..., i].flatten(1).bool().any(dim=1).float() for i in range(seg_gt.shape[-1]) ], dim=0) #    ---> (B, 1)
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
+
+        cls_pred, seg_pred = model(inputs)
+
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, cls_gt=cls_gt, seg_gt=seg_gt)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        metric_logger.update(loss=loss_value)
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-        # model.encoder.layer4.register_forward_hook(get_activation('Activation Map')) # for Activation Map
-        # model.decoder.blocks[3].register_forward_hook(get_activation('Decoder')) # for Activation Map
+    # Gather the stats from all processes
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-        with torch.no_grad():
-            seg_pred  = torch.stack([ model(inputs[..., i])[0].detach().cpu() for i in range(inputs.shape[-1]) ], dim = -1)
-            cls_pred  = torch.stack([ model(inputs[..., i])[1].detach().cpu() for i in range(inputs.shape[-1]) ], dim = 0).flatten(1)
+@torch.no_grad()
+def valid_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'Valid:'
 
-            seg_pred = torch.sigmoid(seg_pred)
-            cls_pred = torch.sigmoid(cls_pred)
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
 
-            if seg_gt.sum() == 0:
-                FalsePositive += seg_pred.round().sum()
+        cls_pred, seg_pred = model(inputs)
 
-            # seg_pred = []
-            # cls_pred = []
-            # cam_pred = []
-            # D_cam_pred = []
-            # for i in range(inputs.shape[-1]):
-            #     result = model(inputs[..., i])
-            #     seg_pred.append(result[0].detach().cpu())
-            #     cls_pred.append(result[1].detach().cpu())
-            #     cam_pred.append(Activation_Map(activation['Activation Map']))
-            #     D_cam_pred.append(Activation_Map(activation['Decoder']))
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, cls_gt=cls_gt, seg_gt=seg_gt)
+        loss_value = loss.item()
 
-            # seg_pred = torch.stack(seg_pred, dim=-1)
-            # cls_pred = torch.stack(cls_pred, dim=0).flatten(1)
-            # cam_pred = np.stack(cam_pred, axis=-1)
-            # D_cam_pred = np.stack(D_cam_pred, axis=-1)
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
 
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
 
-        # total_cls_pred  = torch.cat([total_cls_pred,  torch.sigmoid(cls_pred)],   dim=0)
-        # total_cls_gt    = torch.cat([total_cls_gt,    cls_gt],     dim=0)
+        # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+        seg_pred = torch.sigmoid(seg_pred)
 
-        total_cls_pred  = torch.cat([total_cls_pred,  cls_pred],   dim=0)
-        total_cls_gt    = torch.cat([total_cls_gt,    cls_gt],     dim=0)
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
-        total_seg_pred  = torch.cat([total_seg_pred,  seg_pred.transpose(0, 4)],   dim=0)
-        total_seg_gt    = torch.cat([total_seg_gt,    seg_gt.transpose(0, 4)],     dim=0)
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
+  
 
-        # loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=torch.ones(512,512), cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=torch.ones(512,512))
-        # loss_value = loss.item()
-
-        # if not math.isfinite(loss_value):
-        #     print("Loss is {}, stopping training".format(loss_value))
-
-        # # LOSS
-        # metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
-        # if loss_detail is not None:
-        #     metric_logger.update(**loss_detail)
-
-        # Metrics
-        value, not_nans = dice_metric(y_pred=seg_pred.round(), y=seg_gt)
-        metric_count   += not_nans
-        metric_sum     += value * not_nans
-
-        # # save
-        # img_list.append(inputs.cpu().detach().numpy())
-        # mask_list.append(seg_gt)
-        # label_list.append(cls_gt)
-        # seg_prob_list.append(seg_pred)
-        # cls_prob_list.append(cls_pred)
-        # activation_list.append(cam_pred)
-        # D_activation_list.append(D_cam_pred)
-
-    # Metric SEG
-    Dice = (metric_sum / metric_count).item()
-    print("환자단위 dice = ", Dice)
-
-    # Metrics
-    value, not_nans = dice_metric(y_pred=total_seg_pred.squeeze(4).round(), y=total_seg_gt.squeeze(4))
-    metric_count   += not_nans
-    metric_sum     += value * not_nans
-    print("슬라이스단위 dice = ", Dice)
-    print("FP_seg = ", FalsePositive)
-
-    # Metric CLS
-    AUC = roc_auc_score(total_cls_gt, total_cls_pred)
-    f1  = f1_score(y_true=total_cls_gt, y_pred=total_cls_pred.round())
-    print("F1 score == ",  f1)   
-
-    confuse_result      = confuse_metric(y_pred=total_cls_pred.round(), y=total_cls_gt)
-    confusion_matrix, _ = do_metric_reduction(confuse_result, MetricReduction.SUM)
-
-    TP = confusion_matrix[0].item()
-    FP = confusion_matrix[1].item()
-    TN = confusion_matrix[2].item()
-    FN = confusion_matrix[3].item()
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
     
-    Acc = (TP+TN) / (TP+FP+TN+FN)
-    Sen = TP / (TP+FN)
-    Spe = TN / (TN+FP)
+@torch.no_grad()
+def test_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'TEST:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
+
+        cls_pred, seg_pred = model(inputs)
+
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, cls_gt=cls_gt, seg_gt=seg_gt)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+        seg_pred = torch.sigmoid(seg_pred)
+
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
+  
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
     
-    # # Save Prediction by using npz
-    # save_dict['gt_img']       = img_list
-    # save_dict['gt_mask']      = mask_list
-    # save_dict['gt_label']     = label_list
-    # save_dict['pred_mask']    = seg_prob_list
-    # save_dict['pred_label']   = cls_prob_list
-    # save_dict['activation']   = activation_list
-    # save_dict['D_activation']   = D_activation_list
 
-    # print("Saved npz...! => ", save_path + test_name + '.npz')
-
-    # print("Saved npz...! => ", save_path + test_name + '_cls_3d[AUC_' + str(round(AUC, 3)) + '].npz')
-    # np.savez(save_path + test_name + '.npz', x=save_dict) 
-
-
-    print('* Loss:{losses.global_avg:.3f} | AUC:{AUC:.3f} Acc:{acc:.3f} Sen:{sen:.3f} Spe:{spe:.3f} | Dice:{dice:.3f} '.format(losses=metric_logger.loss, AUC=AUC, acc=Acc, sen=Sen, spe=Spe, dice=Dice))
-    return {'loss': metric_logger.loss.global_avg, 'AUC': AUC, 'Acc': Acc, 'Sen': Sen, 'Spe': Spe, 'Dice': Dice}
-
-
-
-######################################################                    Down Task                         ##########################################################
-def train_Downtask_3dCls(model, criterion, data_loader, optimizer, device, epoch):
+        # CLS+REC
+def train_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size):
     # 2d slice-wise based Learning...! 
     model.train(True)
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 10
     
-    # Gradual Unfreezing
-    # 10 epoch 씩 one stage block 풀기, 100 epoch까지는 아예 고정
-    if epoch <= 100:
-        freeze_params(model)
-    elif epoch >= 111:
-        unfreeze_params(model)
-    elif epoch >= 121:
-        unfreeze_params(model)
-    elif epoch >= 131:
-        unfreeze_params(model)        
-    elif epoch >= 141:
-        unfreeze_params(model)
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
+
+        cls_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(cls_pred=cls_pred, rec_pred=rec_pred, cls_gt=cls_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        metric_logger.update(loss=loss_value)
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        
+    # Gather the stats from all processes
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+@torch.no_grad()
+def valid_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'Valid:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
+
+        cls_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(cls_pred=cls_pred, rec_pred=rec_pred, cls_gt=cls_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+  
+        # Metrics REC
+        mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
+        metric_logger.update(mae=mae)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    
+@torch.no_grad()
+def test_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'TEST:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
+
+        cls_pred, seg_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(cls_pred=cls_pred, rec_pred=rec_pred, cls_gt=cls_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+        # Metrics REC
+        mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
+        metric_logger.update(mae=mae)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+        # SEG+REC
+def train_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size):
+    # 2d slice-wise based Learning...! 
+    model.train(True)
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
+    
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        seg_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(seg_pred=seg_pred, rec_pred=rec_pred, seg_gt=seg_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        metric_logger.update(loss=loss_value)
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        
+    # Gather the stats from all processes
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+@torch.no_grad()
+def valid_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'Valid:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        seg_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(seg_pred=seg_pred, rec_pred=rec_pred, seg_gt=seg_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        seg_pred = torch.sigmoid(seg_pred)
+
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
+  
+        # Metrics REC
+        mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
+        metric_logger.update(mae=mae)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    
+@torch.no_grad()
+def test_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'TEST:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        seg_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(seg_pred=seg_pred, rec_pred=rec_pred, seg_gt=seg_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        seg_pred = torch.sigmoid(seg_pred)
+
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
+  
+        # Metrics REC
+        mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
+        metric_logger.update(mae=mae)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+    # Single
+        # CLS
+def train_Up_SMART_Net_Single_CLS(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size):
+    # 2d slice-wise based Learning...! 
+    model.train(True)
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
+    
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
+
+        cls_pred, seg_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        metric_logger.update(loss=loss_value)
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        
+    # Gather the stats from all processes
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+@torch.no_grad()
+def valid_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'Valid:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
+
+        cls_pred, seg_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    
+@torch.no_grad()
+def test_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'TEST:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
+
+        cls_pred, seg_pred, rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+     
+        # SEG
+def train_Up_SMART_Net_Single_SEG(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size):
+    # 2d slice-wise based Learning...! 
+    model.train(True)
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
+    
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        seg_pred = model(inputs)
+
+        loss, loss_detail = criterion(seg_pred=seg_pred, seg_gt=seg_gt)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        metric_logger.update(loss=loss_value)
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        
+    # Gather the stats from all processes
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+@torch.no_grad()
+def valid_Up_SMART_Net_Single_SEG(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'Valid:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        seg_pred = model(inputs)
+
+        loss, loss_detail = criterion(seg_pred=seg_pred, seg_gt=seg_gt)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        seg_pred = torch.sigmoid(seg_pred)
+
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    
+@torch.no_grad()
+def test_Up_SMART_Net_Single_SEG(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'TEST:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        seg_pred = model(inputs)
+
+        loss, loss_detail = criterion(seg_pred=seg_pred, seg_gt=seg_gt)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # post-processing
+        seg_pred = torch.sigmoid(seg_pred)
+
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+        # REC        
+def train_Up_SMART_Net_Single_REC(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size):
+    # 2d slice-wise based Learning...! 
+    model.train(True)
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
+    
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(rec_pred=rec_pred, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        metric_logger.update(loss=loss_value)
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        
+    # Gather the stats from all processes
+    print("Averaged stats:", metric_logger)
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+@torch.no_grad()
+def valid_Up_SMART_Net_Single_REC(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'Valid:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(rec_pred=rec_pred, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+
+        # Metrics REC
+        mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
+        metric_logger.update(mae=mae)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    
+@torch.no_grad()
+def test_Up_SMART_Net_Single_REC(model, criterion, data_loader, device, print_freq, batch_size):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'TEST:'
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        rec_pred = model(inputs)
+
+        loss, loss_detail = criterion(rec_pred=rec_pred, rec_gt=inputs)
+        loss_value = loss.item()
+
+        if not math.isfinite(loss_value):
+            print("Loss is {}, stopping training".format(loss_value))
+
+        # LOSS
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
+        if loss_detail is not None:
+            metric_logger.update(**loss_detail)
+  
+        # Metrics REC
+        mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
+        metric_logger.update(mae=mae)
+
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+
+
+########################################################
+# Down Task
+    # CLS
+def train_Down_SMART_Net_CLS(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size, gradual_unfreeze):
+    # 3d patient-level based Learning...! 
+    model.train(True)
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    header = 'Epoch: [{}]'.format(epoch)
+    
+    if gradual_unfreeze:
+        # Gradual Unfreezing
+        # 10 epoch 씩 one stage block 풀기, 100 epoch까지는 아예 고정
+        if epoch <= 100:
+            freeze_params(model)
+        elif epoch >= 111:
+            print("Unfreeze encoder.layer4 ...!")
+            unfreeze_params(model)
+        elif epoch >= 121:
+            print("Unfreeze encoder.layer3 ...!")
+            unfreeze_params(model)
+        elif epoch >= 131:
+            print("Unfreeze encoder.layer2 ...!")
+            unfreeze_params(model)        
+        elif epoch >= 141:
+            print("Unfreeze encoder.layer1 ...!")
+            unfreeze_params(model)
+        else :
+            print("Unfreeze encoder.layer0 ...!")
+            unfreeze_params(model)
     else :
-        unfreeze_params(model)
+        freeze_params(model)
 
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        inputs  = batch_data["image"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
-        cls_gt  = batch_data["label"].flatten(1).bool().any(dim=1).float().unsqueeze(1).to(device) #    ---> (B, 1)
-        x_lens  = batch_data["z_shape"]            #    ---> (B, 1) 최근에 Bug 생김. cpu로 넣어줘야 함.
-        # x_lens  = batch_data["z_shape"].to(device) #    ---> (B, 1)
+        inputs  = batch_data["image"].to(device)                                                        # (B, C, H, W, D)
+        cls_gt  = batch_data["label"].flatten(1).bool().any(dim=1, keepdim=True).float().to(device)     #  ---> (B, 1)
+        depths  = batch_data["depths"]                                                                  #  ---> (B, 1) Fix bug, change cpu()
 
-        cls_pred = model(inputs, x_lens)
+        cls_pred = model(inputs, depths)
 
         loss, loss_detail = criterion(cls_pred=cls_pred, cls_gt=cls_gt)
         loss_value = loss.item()
@@ -351,29 +943,19 @@ def train_Downtask_3dCls(model, criterion, data_loader, optimizer, device, epoch
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
-def valid_Downtask_3dCls(model, criterion, data_loader, device):
-    metric_logger = utils.MetricLogger(delimiter="  ")
+def valid_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, batch_size):
+    # 3d patient-level based evaluate ...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
     header = 'Valid:'
-    
-    # switch to evaluation mode
-    model.eval()
-    print_freq = 10
-
-    total_cls_pred  = torch.tensor([], dtype=torch.float32, device='cpu')
-    total_cls_gt    = torch.tensor([], dtype=torch.float32, device='cpu')
 
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        inputs  = batch_data["image"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
-        cls_gt  = batch_data["label"].flatten(1).bool().any(dim=1).float().unsqueeze(1).to(device) #    ---> (B, 1)
-        x_lens  = batch_data["z_shape"]            #    ---> (B, 1) 최근에 Bug 생김. cpu로 넣어줘야 함.
-        # x_lens  = batch_data["z_shape"].to(device) #    ---> (B, 1)
+        inputs  = batch_data["image"].to(device)                                                        # (B, C, H, W, D)
+        cls_gt  = batch_data["label"].flatten(1).bool().any(dim=1, keepdim=True).float().to(device)     #  ---> (B, 1)
+        depths  = batch_data["depths"]                                                                  #  ---> (B, 1) Fix bug, change cpu()
 
-        with torch.no_grad():
-            cls_pred = model(inputs, x_lens)
-
-        total_cls_pred  = torch.cat([total_cls_pred,  torch.sigmoid(cls_pred).detach().cpu()],   dim=0)
-        total_cls_gt    = torch.cat([total_cls_gt,    cls_gt.detach().cpu()],     dim=0)
+        cls_pred = model(inputs, depths)
 
         loss, loss_detail = criterion(cls_pred=cls_pred, cls_gt=cls_gt)
         loss_value = loss.item()
@@ -382,81 +964,34 @@ def valid_Downtask_3dCls(model, criterion, data_loader, device):
             print("Loss is {}, stopping training".format(loss_value))
 
         # LOSS
-        metric_logger.update(loss=loss_value)
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
         if loss_detail is not None:
             metric_logger.update(**loss_detail)
 
-            
-    # Metric CLS
-    AUC = roc_auc_score(total_cls_gt, total_cls_pred)
-    f1  = f1_score(y_true=total_cls_gt, y_pred=total_cls_pred.round())
-    print("F1 score == ",  f1)    
-    confuse_result      = confuse_metric(y_pred=total_cls_pred.round(), y=total_cls_gt) 
-    confusion_matrix, _ = do_metric_reduction(confuse_result, MetricReduction.SUM)
+        # Post-processing
+        cls_pred = torch.sigmoid(cls_pred)
 
-    TP = confusion_matrix[0].item()
-    FP = confusion_matrix[1].item()
-    TN = confusion_matrix[2].item()
-    FN = confusion_matrix[3].item()
-    
-    Acc = (TP+TN) / (TP+FP+TN+FN)
-    Sen = TP / (TP+FN)
-    Spe = TN / (TN+FP)
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
-
-    print('* Loss:{losses.global_avg:.3f} | AUC:{AUC:.3f} Acc:{acc:.3f} Sen:{sen:.3f} Spe:{spe:.3f} '.format(losses=metric_logger.loss, AUC=AUC, acc=Acc, sen=Sen, spe=Spe))
-    # return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    return {'loss': metric_logger.loss.global_avg, 'AUC':AUC, 'Acc': Acc, 'Sen': Sen, 'Spe': Spe}
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
-def test_Downtask_3dCls(model, criterion, data_loader, device, test_name, save_path):
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'TEST:'
-    
-    # switch to evaluation mode
+def test_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, batch_size):
     model.eval()
-    print_freq = 10
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'TEST:'
 
-    # Save npz path 
-    save_dict = dict()
-    
-    total_cls_pred  = torch.tensor([], dtype=torch.float32, device='cpu')
-    total_cls_gt    = torch.tensor([], dtype=torch.float32, device='cpu')
-
-    img_path_list  = []
-    mask_path_list = []
-    img_list       = []
-    mask_list      = []
-    label_list     = []
-    cls_prob_list  = []
-    feature_list   = []
-    
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        img_path   = batch_data["img_path"][0]        # batch 1. so indexing [0]
-        mask_path  = batch_data["mask_path"][0]       # batch 1. so indexing [0]
-        inputs     = batch_data["image"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
-        seg_gt     = batch_data["label"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
-        cls_gt     = batch_data["label"].flatten(1).bool().any(dim=1).float().unsqueeze(1).to(device) #    ---> (B, 1)
-        x_lens     = batch_data["z_shape"]            #    ---> (B, 1) 최근에 Bug 생김. cpu로 넣어줘야 함.
-        # x_lens     = batch_data["z_shape"].to(device) #    ---> (B, 1)
+        inputs  = batch_data["image"].to(device)                                                        # (B, C, H, W, D)
+        cls_gt  = batch_data["label"].flatten(1).bool().any(dim=1, keepdim=True).float().to(device)     #  ---> (B, 1)
+        depths  = batch_data["depths"]                                                                  #  ---> (B, 1) Fix bug, change cpu()
 
-        with torch.no_grad():
-            model.linear1.register_forward_hook(get_features('feat')) # for Representation
-            cls_pred = model(inputs, x_lens)
-            # print("체크 확인용", features['feat'].shape)  #torch.Size([1, 512]) 
-
-            # Save
-            img_path_list.append(img_path)
-            mask_list.append(seg_gt.detach().cpu().numpy())
-            mask_path_list.append(mask_path)
-            img_list.append(inputs.detach().cpu().numpy())
-            label_list.append(cls_gt.detach().cpu().numpy())            
-            cls_prob_list.append(torch.sigmoid(cls_pred).detach().cpu().numpy())
-            feature_list.append(features['feat'].detach().cpu().numpy())
-            
-        total_cls_pred  = torch.cat([total_cls_pred,  torch.sigmoid(cls_pred).detach().cpu()],   dim=0)
-        total_cls_gt    = torch.cat([total_cls_gt,    cls_gt.detach().cpu()],     dim=0)
+        cls_pred = model(inputs, depths)
 
         loss, loss_detail = criterion(cls_pred=cls_pred, cls_gt=cls_gt)
         loss_value = loss.item()
@@ -465,173 +1000,58 @@ def test_Downtask_3dCls(model, criterion, data_loader, device, test_name, save_p
             print("Loss is {}, stopping training".format(loss_value))
 
         # LOSS
-        metric_logger.update(loss=loss_value)
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
         if loss_detail is not None:
             metric_logger.update(**loss_detail)
-    
-    # Metric CLS
-    AUC = roc_auc_score(total_cls_gt, total_cls_pred)
-    confuse_result      = confuse_metric(y_pred=total_cls_pred.round(), y=total_cls_gt) 
-    confusion_matrix, _ = do_metric_reduction(confuse_result, MetricReduction.SUM)
-    f1  = f1_score(y_true=total_cls_gt, y_pred=total_cls_pred.round())
-    print("F1 score == ",  f1)
-    TP = confusion_matrix[0].item()
-    FP = confusion_matrix[1].item()
-    TN = confusion_matrix[2].item()
-    FN = confusion_matrix[3].item()
-    
-    Acc = (TP+TN) / (TP+FP+TN+FN)
-    Sen = TP / (TP+FN)
-    Spe = TN / (TN+FP)
 
-    # Save Prediction by using npz
-    save_dict['gt_img_path']  = img_path_list
-    save_dict['gt_mask_path'] = mask_path_list
-    save_dict['gt_img']       = img_list
-    save_dict['gt_mask']      = mask_list
-    save_dict['gt_label']     = label_list
-    save_dict['pred_label']   = cls_prob_list
-    save_dict['feature']      = feature_list
+        # Post-processing
+        cls_pred = torch.sigmoid(cls_pred)
 
-    print("Saved npz...! => ", save_path + test_name + '_cls_3d[AUC_' + str(round(AUC, 3)) + '].npz')
-    np.savez(save_path + test_name + '_cls_3d[AUC_' + str(round(AUC, 3)) + '].npz', cls_3d=save_dict) 
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
-    print('* Loss:{losses.global_avg:.3f} | AUC:{AUC:.3f} Acc:{acc:.3f} Sen:{sen:.3f} Spe:{spe:.3f} '.format(losses=metric_logger.loss, AUC=AUC, acc=Acc, sen=Sen, spe=Spe))
-    return {'loss': metric_logger.loss.global_avg, 'AUC':AUC, 'Acc': Acc, 'Sen': Sen, 'Spe': Spe}
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-# Inference code 
-@torch.no_grad()
-def inference_Downtask_3dCls(model, criterion, data_loader, device, test_name, save_path):
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'TEST:'
-    
-    # switch to evaluation mode
-    model.eval()
-    print_freq = 10
-
-    # Save npz path 
-    save_dict = dict()
-    
-    total_cls_pred  = torch.tensor([], dtype=torch.float32, device='cpu')
-    total_cls_gt    = torch.tensor([], dtype=torch.float32, device='cpu')
-
-    img_path_list  = []
-    mask_path_list = []
-    img_list       = []
-    mask_list      = []
-    label_list     = []
-    cls_prob_list  = []
-    feature_list   = []
-    
-    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
-        
-        img_path   = batch_data["img_path"][0]        # batch 1. so indexing [0]
-        inputs     = batch_data["image"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
-        cls_gt     = batch_data["label"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
-        x_lens     = batch_data["z_shape"]            #    ---> (B, 1) 최근에 Bug 생김. cpu로 넣어줘야 함.
-        # x_lens     = batch_data["z_shape"].to(device) #    ---> (B, 1)
-
-        with torch.no_grad():
-            model.linear1.register_forward_hook(get_features('feat')) # for Representation
-            cls_pred = model(inputs, x_lens)
-            # print("체크 확인용", features['feat'].shape)  #torch.Size([1, 512]) 
-
-            # Save
-            img_path_list.append(img_path)
-            img_list.append(inputs.detach().cpu().numpy())
-            label_list.append(cls_gt.detach().cpu().numpy())            
-            cls_prob_list.append(torch.sigmoid(cls_pred).detach().cpu().numpy())
-            feature_list.append(features['feat'].detach().cpu().numpy())
-            
-        total_cls_pred  = torch.cat([total_cls_pred,  torch.sigmoid(cls_pred).detach().cpu()],   dim=0)
-        total_cls_gt    = torch.cat([total_cls_gt,    cls_gt.detach().cpu()],     dim=0)
-
-        loss, loss_detail = criterion(cls_pred=cls_pred, cls_gt=cls_gt)
-        loss_value = loss.item()
-
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-
-        # LOSS
-        metric_logger.update(loss=loss_value)
-        if loss_detail is not None:
-            metric_logger.update(**loss_detail)
-    
-    # Metric CLS
-    AUC = roc_auc_score(total_cls_gt, total_cls_pred)
-    confuse_result      = confuse_metric(y_pred=total_cls_pred.round(), y=total_cls_gt) 
-    confusion_matrix, _ = do_metric_reduction(confuse_result, MetricReduction.SUM)
-    f1  = f1_score(y_true=total_cls_gt, y_pred=total_cls_pred.round())
-    print("F1 score == ",  f1)
-    TP = confusion_matrix[0].item()
-    FP = confusion_matrix[1].item()
-    TN = confusion_matrix[2].item()
-    FN = confusion_matrix[3].item()
-    
-    Acc = (TP+TN) / (TP+FP+TN+FN)
-    Sen = TP / (TP+FN)
-    Spe = TN / (TN+FP)
-
-    # Save Prediction by using npz
-    save_dict['gt_img_path']  = img_path_list
-    save_dict['gt_img']       = img_list
-    save_dict['gt_label']     = label_list
-    save_dict['pred_label']   = cls_prob_list
-    save_dict['feature']      = feature_list
-
-    print("Saved npz...! => ", save_path + test_name + '_cls_3d[AUC_' + str(round(AUC, 3)) + '].npz')
-    np.savez(save_path + test_name + '_cls_3d[AUC_' + str(round(AUC, 3)) + '].npz', cls_3d=save_dict) 
-
-    print('* Loss:{losses.global_avg:.3f} | AUC:{AUC:.3f} Acc:{acc:.3f} Sen:{sen:.3f} Spe:{spe:.3f} '.format(losses=metric_logger.loss, AUC=AUC, acc=Acc, sen=Sen, spe=Spe))
-    return {'loss': metric_logger.loss.global_avg, 'AUC':AUC, 'Acc': Acc, 'Sen': Sen, 'Spe': Spe}
-
-
-
-
-def train_Downtask_3dSeg(model, criterion, data_loader, optimizer, device, epoch, progressive_transfer_learning):
-    # 2d slice-wise based Learning...! 
+    # SEG
+def train_Down_SMART_Net_SEG(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size, gradual_unfreeze):
+    # 3d patient-level based Learning...! 
     model.train(True)
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 10
-    
+
+    if gradual_unfreeze:
+        # Gradual Unfreezing
+        # 10 epoch 씩 one stage block 풀기, 100 epoch까지는 아예 고정
+        if epoch <= 100:
+            freeze_params(model)
+        elif epoch >= 111:
+            print("Unfreeze encoder.layer4 ...!")
+            unfreeze_params(model)
+        elif epoch >= 121:
+            print("Unfreeze encoder.layer3 ...!")
+            unfreeze_params(model)
+        elif epoch >= 131:
+            print("Unfreeze encoder.layer2 ...!")
+            unfreeze_params(model)        
+        elif epoch >= 141:
+            print("Unfreeze encoder.layer1 ...!")
+            unfreeze_params(model)
+        else :
+            print("Unfreeze encoder.layer0 ...!")
+            unfreeze_params(model)
+    else :
+        freeze_params(model)
+
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        inputs  = batch_data["image"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
-        seg_gt  = batch_data["label"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
+        inputs  = batch_data["image"].to(device)                 # (B, C, H, W, D)
+        seg_gt  = batch_data["label"].to(device)                 # (B, C, H, W, D)
 
-        if progressive_transfer_learning:
-            if epoch == 4:
-                print("Unfreeze Layer 4...!")
-                for name, param in model.named_parameters(): 
-                    if 'encoder.layer4.' in name:
-                        param.requires_grad = True
-            elif epoch == 9:
-                print("Unfreeze Layer 3,4...!")
-                for name, param in model.named_parameters(): 
-                    if 'encoder.layer3.' in name:
-                        param.requires_grad = True
-
-            elif epoch == 14:
-                print("Unfreeze Layer 2,3,4...!")
-                for name, param in model.named_parameters(): 
-                    if 'encoder.layer2.' in name:
-                        param.requires_grad = True
-
-            elif epoch == 19:
-                print("Unfreeze Layer 1,2,3,4...!")
-                for name, param in model.named_parameters(): 
-                    if 'encoder.layer1.' in name:
-                        param.requires_grad = True                                   
-
-            seg_pred = model(inputs)
-        
-        else:
-            seg_pred = model(inputs)
-
-
-
+        seg_pred = model(inputs)
 
         loss, loss_detail = criterion(seg_pred=seg_pred, seg_gt=seg_gt)
         loss_value = loss.item()
@@ -646,7 +1066,6 @@ def train_Downtask_3dSeg(model, criterion, data_loader, optimizer, device, epoch
         metric_logger.update(loss=loss_value)
         if loss_detail is not None:
             metric_logger.update(**loss_detail)
-            # metric_logger.update(RotationLoss=loss1.data.item())
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
     # Gather the stats from all processes
@@ -655,22 +1074,18 @@ def train_Downtask_3dSeg(model, criterion, data_loader, optimizer, device, epoch
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
-def valid_Downtask_3dSeg(model, criterion, data_loader, device):
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'Valid:'
-    
-    # switch to evaluation mode
+def valid_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, batch_size):
+    # 3d patient-level based evaluate ...! 
     model.eval()
-    print_freq = 10
-    metric_count = metric_sum = 0
-    
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'Valid:'
+
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        inputs  = batch_data["image"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
-        seg_gt  = batch_data["label"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
+        inputs  = batch_data["image"].to(device)                                   # (B, C, H, W, D)
+        seg_gt  = batch_data["label"].to(device)                                   # (B, C, H, W, D)
 
-        with torch.no_grad():
-            seg_pred = model(inputs)
+        seg_pred = model(inputs)
 
         loss, loss_detail = criterion(seg_pred=seg_pred, seg_gt=seg_gt)
         loss_value = loss.item()
@@ -679,67 +1094,32 @@ def valid_Downtask_3dSeg(model, criterion, data_loader, device):
             print("Loss is {}, stopping training".format(loss_value))
 
         # LOSS
-        metric_logger.update(loss=loss_value)
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
         if loss_detail is not None:
             metric_logger.update(**loss_detail)
 
-        # Metrics
-        value, not_nans = dice_metric(y_pred=torch.sigmoid(seg_pred).round(), y=seg_gt)
-        metric_count   += not_nans
-        metric_sum     += value * not_nans
+        # post-processing
+        seg_pred = torch.sigmoid(seg_pred)
 
-        
-    # Metric SEG
-    Dice = (metric_sum / metric_count).item()
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
 
-    print('* Loss:{losses.global_avg:.3f} | Dice:{dice:.3f} '.format(losses=metric_logger.loss, dice=Dice))
-    # return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    return {'loss': metric_logger.loss.global_avg, 'Dice': Dice}
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
-def test_Downtask_3dSeg(model, criterion, data_loader, device, test_name, save_path):
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    header = 'TEST:'
-
-    # switch to evaluation mode
+def test_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, batch_size):
+    # 3d patient-level based evaluate ...! 
     model.eval()
-    print_freq = 10
-    metric_count = metric_sum = 0    
-
-    # Save npz path 
-    save_dict = dict()
-
-    img_path_list   = []
-    mask_path_list  = []
-    img_list        = []
-    mask_list       = []
-    seg_prob_list   = []
-    active_map_list = []
-    dice_list       = []
+    metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
+    header = 'Valid:'
 
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        img_path   = batch_data["img_path"][0]        # batch 1. so indexing [0]
-        mask_path  = batch_data["mask_path"][0]       # batch 1. so indexing [0]
-        inputs     = batch_data["image"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
-        seg_gt     = batch_data["label"].to(device)   # (B, C, H, W, 1) ---> (B, C, H, W)
+        inputs  = batch_data["image"].to(device)                                   # (B, C, H, W, D)
+        seg_gt  = batch_data["label"].to(device)                                   # (B, C, H, W, D)
 
-        with torch.no_grad():
-            model.encoder.layer4[2].relu.register_forward_hook(get_activation('Activation Map')) # for Activation Map
-            seg_pred = model(inputs)
-
-            # print("체크 확인용", activation['Activation Map'].shape)  # torch.Size([32, 2048, 16, 16])
-            # print("체크 확인용2", inputs.shape)  # [1, 1, 256, 256, 32]
-
-            # plt.imshow(only_cls, 'jet', alpha=0.5)
-            # Save
-            img_path_list.append(img_path)
-            mask_path_list.append(mask_path)
-            img_list.append(inputs.detach().cpu().numpy())
-            mask_list.append(seg_gt.detach().cpu().numpy())
-            seg_prob_list.append(torch.sigmoid(seg_pred).detach().cpu().numpy())
-            active_map_list.append(Activation_Map(activation['Activation Map']))
-
+        seg_pred = model(inputs)
 
         loss, loss_detail = criterion(seg_pred=seg_pred, seg_gt=seg_gt)
         loss_value = loss.item()
@@ -748,29 +1128,133 @@ def test_Downtask_3dSeg(model, criterion, data_loader, device, test_name, save_p
             print("Loss is {}, stopping training".format(loss_value))
 
         # LOSS
-        metric_logger.update(loss=loss_value)
+        metric_logger.update(loss=loss_value)  # 1 epoch의 배치들의 loss를 적립한뒤 epoch 끝나면 갯수 만큼 평균
         if loss_detail is not None:
             metric_logger.update(**loss_detail)
 
-        # Metrics
-        value, not_nans = dice_metric(y_pred=torch.sigmoid(seg_pred).round(), y=seg_gt)
-        metric_count   += not_nans
-        metric_sum     += value * not_nans
-        dice_list.append(value * not_nans)
+        # post-processing
+        seg_pred = torch.sigmoid(seg_pred)
 
-    Dice = (metric_sum / metric_count).item()
-    # Save Prediction by using npz
-    save_dict['gt_img_path']   = img_path_list
-    save_dict['gt_mask_path']  = mask_path_list
-    save_dict['gt_img']        = img_list
-    save_dict['gt_mask']       = mask_list
-    save_dict['pred_mask']     = seg_prob_list
-    save_dict['active_map']    = active_map_list
-    save_dict['dice']          = dice_list
+        # Metrics SEG
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        metric_logger.update(dice=dice)
 
-    print("Saved npz...! => ", save_path + test_name + '_seg_3d[Dice_' + str(round(Dice, 3)) + '].npz')
-    np.savez(save_path + test_name + '_seg_3d[Dice_' + str(round(Dice, 3)) + '].npz', seg_3d=save_dict) 
+    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-    print('* Loss:{losses.global_avg:.3f} | Dice:{dice:.3f} '.format(losses=metric_logger.loss, dice=Dice))
-    # return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    return {'loss': metric_logger.loss.global_avg, 'Dice': Dice}
+
+
+########################################################
+## Inference code 
+from monai.transforms import SaveImage
+
+    # SMAET-Net
+@torch.no_grad()
+def infer_Up_SMART_Net(model, data_loader, device, print_freq, save_dir):
+    # 2d slice-wise based evaluate...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=1)
+    header = 'TEST:'
+    
+    save_dict = dict()
+    img_path_list = []
+    img_list = []
+    cls_list = []
+    seg_list = []
+    rec_list = []
+    act_list = []
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+
+        model.encoder.layer4.register_forward_hook(get_activation('Activation Map')) # for Activation Map
+
+        cls_pred, seg_pred, rec_pred = model(inputs)
+
+        # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+        seg_pred = torch.sigmoid(seg_pred)
+
+        img_path_list.append(batch_data["img_path"][0])
+        img_list.append(batch_data["gt_img"][0])
+        cls_list.append(cls_pred)
+        seg_list.append(seg_pred)
+        rec_list.append(rec_pred)
+        act_list.append(Activation_Map(activation['Activation Map']))
+
+
+    save_dict['gt_img_path']    = img_path_list
+    save_dict['gt_img']         = img_list
+    save_dict['cls_pred']       = cls_list
+    save_dict['seg_pred']       = seg_list
+    save_dict['rec_pred']       = rec_list
+    save_dict['activation_map'] = act_list
+    np.savez(save_dir + '.npz', result=save_dict) 
+
+    # CLS
+@torch.no_grad()
+def infer_Down_SMART_Net_CLS(model, data_loader, device, print_freq, save_dir):
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=1)
+    header = 'TEST:'
+
+    save_dict = dict()
+    img_path_list = []
+    img_list  = []
+    cls_list  = []
+    feat_list = []
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        
+        inputs  = batch_data["image"].to(device)                                                        # (B, C, H, W, D)
+        depths  = batch_data["depths"]                                                                  #  ---> (B, 1) Fix bug, change cpu()
+
+        model.fc.register_forward_hook(get_features('feat')) # for Representation
+        
+        cls_pred = model(inputs, depths)
+
+        # Post-processing
+        cls_pred = torch.sigmoid(cls_pred)
+
+        img_path_list.append(batch_data["img_path"][0])
+        img_list.append(batch_data["gt_img"][0])
+        cls_list.append(cls_pred)
+        feat_list.append(features['feat'].detach().cpu().numpy())
+
+    save_dict['gt_img_path']    = img_path_list
+    save_dict['gt_img']         = img_list
+    save_dict['cls_pred']       = cls_list
+    save_dict['feat']           = feat_list
+    np.savez(save_dir + '.npz', result=save_dict) 
+
+
+    # SEG
+@torch.no_grad()
+def infer_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, save_dir):
+    # 3d patient-level based evaluate ...! 
+    model.eval()
+    metric_logger = utils.MetricLogger(delimiter="  ", n=1)
+    header = 'TEST:'
+
+    saver = SaveImage(output_dir=save_dir, 
+                    output_postfix='Pred', 
+                    output_ext='.nii.gz', 
+                    resample=True, 
+                    mode='nearest', 
+                    squeeze_end_dims=True, 
+                    data_root_dir='', 
+                    separate_folder=True, 
+                    print_log=True)
+
+    for batch_data in metric_logger.log_every(data_loader, print_freq, header):
+        
+        inputs  = batch_data["image"].to(device)                                   # (B, C, H, W, D)
+
+        seg_pred = model(inputs)
+
+        # post-processing
+        seg_pred = torch.sigmoid(seg_pred)
+
+        # Save nii
+        saver(seg_pred.squeeze(0).round(), batch_data['image_meta_dict'])  # Note: image should be channel-first shape: [C,H,W,[D]].

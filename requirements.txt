@@ -1,24 +1,22 @@
 # This file may be used to create an environment using:
-# $ conda create --name <env> --file <this file>
-# platform: linux-64
 
-tqdm
-sklearn
-scikit-image
-simpleitk
-scipy
-matplotlib
-
-
-torch==1.3.1
-torchsummary
-
-
-
-import cv2
-import torch
-import skimage
-
-import albumentations as albu
-from monai.transforms import *
-from monai.data import Dataset
+einops                            
+h5py                              
+imageio                           
+json5                             
+jsonschema                        
+matplotlib                        
+monai                             
+nbconvert                         
+nibabel                           
+numpy                             
+opencv-python                     
+pandas                            
+Pillow                            
+pydicom                           
+scikit-image                      
+scipy                             
+SimpleITK                         
+torch                             
+torchvision                       
+tqdm                              
