@@ -241,7 +241,7 @@ def pad_collate_fn(batch):
 
 # Dataset
     ## Up Task
-def Hemo_Uptask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/samples"):
+def Hemo_Uptask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples"):
     if mode == 'train':
         img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_img.nii.gz"))
         label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_mask.nii.gz"))
@@ -310,7 +310,7 @@ def Hemo_Uptask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SM
     return Dataset(data=data_dicts, transform=transforms), default_collate_fn
 
     ## Down Task
-def Hemo_Downtask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/samples"):
+def Hemo_Downtask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples"):
     if mode == 'train':
         img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_img.nii.gz"))
         label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_mask.nii.gz"))
@@ -379,7 +379,7 @@ def Hemo_Downtask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/
 
 
 # TEST
-def Hemo_TEST_Dataset(test_dataset_name, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/samples"):
+def Hemo_TEST_Dataset(test_dataset_name, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples"):
     if test_dataset_name == 'Custom':
         img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/test/*_img.nii.gz"))
         label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/test/*_mask.nii.gz"))

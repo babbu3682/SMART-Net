@@ -17,7 +17,7 @@ import functools
 
 import utils
 from create_model import create_model
-from datasets.prepare_datasets import build_dataset
+from create_datasets.prepare_datasets import build_dataset
 from engine import *
 from losses import Uptask_Loss, Downtask_Loss
 from optimizers import create_optim
@@ -40,7 +40,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser('SMART-Net Framework Train and Test script', add_help=False)
 
     # Dataset parameters
-    parser.add_argument('--data-folder-dir', default="/workspace/sunggu/1.Hemorrhage/SMART-Net/samples", type=str, help='dataset folder dirname')    
+    parser.add_argument('--data-folder-dir', default="/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples", type=str, help='dataset folder dirname')    
     
     # Model parameters
     parser.add_argument('--model-name', default='SMART_Net', type=str, help='model name')
