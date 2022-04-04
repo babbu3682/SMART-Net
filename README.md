@@ -227,7 +227,7 @@ python test.py \
 - [x] Down_SMART_Net_CLS
 - [x] Down_SMART_Net_SEG
 
-#### - SMART-Net
+#### - Up-SMART-Net
 **+ inference**: We conducted downstream training using multi-task representation.
 ```bash
 python inference.py \
@@ -245,7 +245,7 @@ python inference.py \
 --resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test/epoch_0_checkpoint.pth'
 
 ```
-#### - SMART-Net-CLS
+#### - Down-SMART-Net-CLS
 **+ inference**: We conducted downstream training using multi-task representation.
 ```bash
 python inference.py \
@@ -263,7 +263,7 @@ python inference.py \
 --resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_cls_test/epoch_0_checkpoint.pth'
 
 ```
-#### - SMART-Net-SEG
+#### - Down-SMART-Net-SEG
 **+ inference**: We conducted downstream training using multi-task representation.
 ```bash
 python inference.py \
