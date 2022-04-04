@@ -37,14 +37,14 @@ class Up_SMART_Net(Multi_Task_Model):
         self.classification_head = ClassificationHead(
             in_channels=self.encoder.out_channels[-1], 
             pooling='avg', 
-            dropout=0.5
+            dropout=0.5,
+            out_channels=1,
         )
 
         # SEG
-        self.decoder = Unet_Decoder(
+        self.seg_decoder = Unet_Decoder(
             encoder_channels=self.encoder.out_channels,
             decoder_channels=decoder_channels,
-            n_blocks=encoder_depth,
             use_batchnorm=decoder_use_batchnorm,
             center=False,
             attention_type=decoder_attention_type,
@@ -56,15 +56,14 @@ class Up_SMART_Net(Multi_Task_Model):
         )
 
         # REC
-        self.recon_decoder = AE_Decoder(
+        self.rec_decoder = AE_Decoder(
             encoder_channels=self.encoder.out_channels,
             decoder_channels=decoder_channels,
-            n_blocks=encoder_depth,
             use_batchnorm=False,
             center=False,
             attention_type=decoder_attention_type,
         )
-        self.recon_head = ReconstructionHead(
+        self.reconstruction_head = ReconstructionHead(
             in_channels=decoder_channels[-1]//2,
             out_channels=1,
             kernel_size=3,
@@ -72,7 +71,6 @@ class Up_SMART_Net(Multi_Task_Model):
 
         self.name = "SMART-Net-{}".format(encoder_name)
         self.initialize()
-
 
 
 ## Dual
@@ -99,14 +97,14 @@ class Up_SMART_Net_Dual_CLS_SEG(Dual_Task_Model_CLS_SEG):
         self.classification_head = ClassificationHead(
             in_channels=self.encoder.out_channels[-1], 
             pooling='avg', 
-            dropout=0.5
+            dropout=0.5,
+            out_channels=1,
         )
 
         # SEG
-        self.decoder = Unet_Decoder(
+        self.seg_decoder = Unet_Decoder(
             encoder_channels=self.encoder.out_channels,
             decoder_channels=decoder_channels,
-            n_blocks=encoder_depth,
             use_batchnorm=decoder_use_batchnorm,
             center=False,
             attention_type=decoder_attention_type,
@@ -142,19 +140,19 @@ class Up_SMART_Net_Dual_CLS_REC(Dual_Task_Model_CLS_REC):
         self.classification_head = ClassificationHead(
             in_channels=self.encoder.out_channels[-1], 
             pooling='avg', 
-            dropout=0.5
+            dropout=0.5,
+            out_channels=1,
         )
 
         # REC
-        self.recon_decoder = AE_Decoder(
+        self.rec_decoder = AE_Decoder(
             encoder_channels=self.encoder.out_channels,
             decoder_channels=decoder_channels,
-            n_blocks=encoder_depth,
             use_batchnorm=False,
             center=False,
             attention_type=decoder_attention_type,
         )
-        self.recon_head = ReconstructionHead(
+        self.reconstruction_head = ReconstructionHead(
             in_channels=decoder_channels[-1]//2,
             out_channels=1,
             kernel_size=3,
@@ -183,10 +181,9 @@ class Up_SMART_Net_Dual_SEG_REC(Dual_Task_Model_SEG_REC):
         )
 
         # SEG
-        self.decoder = Unet_Decoder(
+        self.seg_decoder = Unet_Decoder(
             encoder_channels=self.encoder.out_channels,
             decoder_channels=decoder_channels,
-            n_blocks=encoder_depth,
             use_batchnorm=decoder_use_batchnorm,
             center=False,
             attention_type=decoder_attention_type,
@@ -198,15 +195,14 @@ class Up_SMART_Net_Dual_SEG_REC(Dual_Task_Model_SEG_REC):
         )
 
         # REC
-        self.recon_decoder = AE_Decoder(
+        self.rec_decoder = AE_Decoder(
             encoder_channels=self.encoder.out_channels,
             decoder_channels=decoder_channels,
-            n_blocks=encoder_depth,
             use_batchnorm=False,
             center=False,
             attention_type=decoder_attention_type,
         )
-        self.recon_head = ReconstructionHead(
+        self.reconstruction_head = ReconstructionHead(
             in_channels=decoder_channels[-1]//2,
             out_channels=1,
             kernel_size=3,
@@ -237,7 +233,8 @@ class Up_SMART_Net_Single_CLS(Single_Task_Model_CLS):
         self.classification_head = ClassificationHead(
             in_channels=self.encoder.out_channels[-1], 
             pooling='avg', 
-            dropout=0.5
+            dropout=0.5,
+            out_channels=1,
         )
 
         self.name = "SMART-Net-{}".format(encoder_name)
@@ -263,10 +260,9 @@ class Up_SMART_Net_Single_SEG(Single_Task_Model_SEG):
         )
 
         # SEG
-        self.decoder = Unet_Decoder(
+        self.seg_decoder = Unet_Decoder(
             encoder_channels=self.encoder.out_channels,
             decoder_channels=decoder_channels,
-            n_blocks=encoder_depth,
             use_batchnorm=decoder_use_batchnorm,
             center=False,
             attention_type=decoder_attention_type,
@@ -299,15 +295,14 @@ class Up_SMART_Net_Single_REC(Single_Task_Model_REC):
         )
 
         # REC
-        self.recon_decoder = AE_Decoder(
+        self.rec_decoder = AE_Decoder(
             encoder_channels=self.encoder.out_channels,
             decoder_channels=decoder_channels,
-            n_blocks=encoder_depth,
             use_batchnorm=False,
             center=False,
             attention_type=decoder_attention_type,
         )
-        self.recon_head = ReconstructionHead(
+        self.reconstruction_head = ReconstructionHead(
             in_channels=decoder_channels[-1]//2,
             out_channels=1,
             kernel_size=3,
@@ -337,21 +332,32 @@ class Down_SMART_Net_CLS(torch.nn.Module):
         # Head
         self.head    = nn.Linear(512, 1, True)       
 
-    
+
+        # # D stacking Features
+        # encoder_embed_seq = []
+        # for i in range(x.shape[-1]):
+        #     out = self.encoder(x[..., i])[-1]
+        #     out = self.pool(out)
+        #     out = out.view(out.shape[0], -1)
+        #     encoder_embed_seq.append(out)   
+        # stacked_feat = torch.stack(encoder_embed_seq, dim=1)
+
     def forward(self, x, depths):
 
-        # N stacking Features
-        encoder_embed_seq = []
-        for i in range(x.shape[-1]):
-            out = self.encoder(x[..., i])[-1]
-            out = self.pool(out)
-            out = out.view(out.shape[0], -1)
-            encoder_embed_seq.append(out)   
-        stacked_feat = torch.stack(encoder_embed_seq, dim=1)
+        B, C, H, W, D = x.shape
 
-        # Input 3D Classifier, (Batch, Seq, Feat)
+        # D stacking Features
+        x = x.permute(4, 0, 1, 2, 3)                      # (B, C, H, W, D)   --> (D, B, C, H, W)
+        x = torch.reshape(x, [D*B, C, H, W])              # (D, B, C, H, W)   --> (D*B, C, H, W)        
+        x = self.encoder(x)[-1]                         # (D*B, C, H, W)    --> (D*B, C*, H*, W*)
+        x = self.pool(x)                              # (D*B, C*, H*, W*) --> (D*B, C*, 1, 1)  
+        x = x.flatten(start_dim=1, end_dim=-1)        # (D*B, C*, 1, 1)   --> (D*B, C*)           
+        x = torch.reshape(x, [D, B, x.shape[-1]])   # (D*B, C*)         --> (D, B, C*)
+        x = x.permute(1, 0, 2)                        # (D, B, C*)        --> (B, D, C*)
+
+        # 3D Classifier, Input = (Batch, Seq, Feat)
         self.LSTM.flatten_parameters()  
-        x_packed = pack_padded_sequence(stacked_feat, depths.cpu(), batch_first=True, enforce_sorted=False)
+        x_packed = pack_padded_sequence(x, depths.cpu(), batch_first=True, enforce_sorted=False)
         RNN_out, (h_n, h_c) = self.LSTM(x_packed, None)    
         fc_input = torch.cat([h_n[-1], h_n[-2]], dim=-1) # Due to the Bi-directional
         x = self.fc(fc_input)
@@ -363,13 +369,14 @@ class Down_SMART_Net_CLS(torch.nn.Module):
 
         return x     
 
+
 class Down_SMART_Net_SEG(torch.nn.Module):
     def __init__(self):
         super(Down_SMART_Net_SEG, self).__init__()
 
         # Slicewise Feature Extract
-        self.encoder = Up_SMART_Net().encoder
-        self.decoder = Up_SMART_Net().decoder
+        self.encoder     = Up_SMART_Net().encoder
+        self.seg_decoder = Up_SMART_Net().seg_decoder
         
         # 3D Segmentor - ResNet50 based
         self.conv1 = nn.Conv3d(in_channels=16, out_channels=16, kernel_size=3, stride=1, padding=1, bias=True)
@@ -380,40 +387,21 @@ class Down_SMART_Net_SEG(torch.nn.Module):
         self.relu2 = nn.ReLU()
         
         # Head
-        self.last  = nn.Conv3d(in_channels=16, out_channels=1, kernel_size=3, stride=1, padding=1, bias=True)
+        self.head  = nn.Conv3d(in_channels=16, out_channels=1, kernel_size=3, stride=1, padding=1, bias=True)
 
     
     def forward(self, x):
-        N, C, H, W, D = x.shape
-        x = x.permute(4, 0, 1, 2, 3)
-        x = torch.reshape(x, [D*N, C, H, W])
-        
-        if self.end2end:
-            features = self.encoder(x)
-            x        = self.decoder(*features) 
+        B, C, H, W, D = x.shape
 
-        else:
-            if self.freeze_decoder:
-                self.encoder.eval()
-                self.decoder.eval()
-                with torch.no_grad():
-                    features = self.encoder(x)
-                    x        = self.decoder(*features)
-                
+        # D stacking Features
+        x = x.permute(4, 0, 1, 2, 3)              # (B, C, H, W, D) --> (D, B, C, H, W)
+        x = torch.reshape(x, [D*B, C, H, W])      # (D, B, C, H, W) --> (D*B, C, H, W)
+        feat_list = self.encoder(x)               
+        x         = self.seg_decoder(*feat_list)  
 
-            else :
-                self.encoder.eval()
-                with torch.no_grad():
-                    features = self.encoder(x)
-
-                x = self.decoder(*features)                
-
-
-        
-        new_shape = [D, N] + list(x.shape)[1:]
-        x = torch.reshape(x, new_shape)
-        x = x.permute(1,2,3,4,0)
-        
+        # 3D Segmentor, Input = (D*B, C, H, W)
+        x = torch.reshape(x, [D, B] + list(x.shape)[1:])   # (D*B, C*, H, W)  --> (D, B, C*, H, W)
+        x = x.permute(1, 2, 3, 4, 0)                       # (D, B, C*, H, W) --> (B, C*, H, W, D)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu1(x)
@@ -421,7 +409,8 @@ class Down_SMART_Net_SEG(torch.nn.Module):
         x = self.bn2(x)
         x = self.relu2(x)
         
-        x = self.last(x)
+        # Head
+        x = self.head(x)
         
         return x
 

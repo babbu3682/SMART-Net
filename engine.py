@@ -92,9 +92,8 @@ def train_Up_SMART_Net(model, criterion, data_loader, optimizer, device, epoch, 
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-    # Gather the stats from all processes
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+ 
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def valid_Up_SMART_Net(model, criterion, data_loader, device, print_freq, batch_size):
@@ -127,20 +126,21 @@ def valid_Up_SMART_Net(model, criterion, data_loader, device, print_freq, batch_
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
   
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
 @torch.no_grad()
 def test_Up_SMART_Net(model, criterion, data_loader, device, print_freq, batch_size):
@@ -173,20 +173,21 @@ def test_Up_SMART_Net(model, criterion, data_loader, device, print_freq, batch_s
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
   
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
      
 @torch.no_grad()
 def test_Up_SMART_Net_Patient_Level(model, criterion, data_loader, device, print_freq, batch_size):
@@ -197,12 +198,16 @@ def test_Up_SMART_Net_Patient_Level(model, criterion, data_loader, device, print
 
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        inputs  = batch_data["image"].to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
-        seg_gt  = batch_data["label"].to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
+        inputs  = batch_data["image"].to(device)      # (B, C, H, W, D) 
+        seg_gt  = batch_data["label"]                 # (B, C, H, W, D)
+        cls_gt  = torch.stack([ seg_gt[..., i].flatten(1).bool().any(dim=1, keepdim=True).float() for i in range(seg_gt.shape[-1]) ], dim=0) #  ---> (B, 1)
 
+        cls_pred  = torch.stack([ model(inputs[..., i])[0].detach().cpu() for i in range(inputs.shape[-1]) ], dim = 0).flatten(1)
         seg_pred  = torch.stack([ model(inputs[..., i])[1].detach().cpu() for i in range(inputs.shape[-1]) ], dim = -1)
+        # rec_pred  = torch.stack([ model(inputs[..., i])[2].detach().cpu() for i in range(inputs.shape[-1]) ], dim = -1)    
 
-        loss, loss_detail = criterion(seg_pred=seg_pred, seg_gt=seg_gt)
+        # loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
+        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, cls_gt=cls_gt, seg_gt=seg_gt)
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -214,13 +219,25 @@ def test_Up_SMART_Net_Patient_Level(model, criterion, data_loader, device, print
             metric_logger.update(**loss_detail)
 
         # post-processing
+        cls_pred = torch.sigmoid(cls_pred)
         seg_pred = torch.sigmoid(seg_pred)
 
-        # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
-        metric_logger.update(dice=dice)
+        # Metric CLS
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
+        f1, acc, sen, spe   = confuse_metric.aggregate()
+        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+        # Metrics SEG
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
+        metric_logger.update(dice=dice)
+  
+        # # Metrics REC
+        # mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
+        # metric_logger.update(mae=mae)
+
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 
     # Dual
@@ -255,9 +272,8 @@ def train_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, optimizer, de
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-    # Gather the stats from all processes
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+ 
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def valid_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, device, print_freq, batch_size):
@@ -290,17 +306,18 @@ def valid_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, device, print
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
   
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
 @torch.no_grad()
 def test_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, device, print_freq, batch_size):
@@ -333,17 +350,18 @@ def test_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, device, print_
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
   
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
 
         # CLS+REC
@@ -377,9 +395,8 @@ def train_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, optimizer, de
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-    # Gather the stats from all processes
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+ 
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def valid_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print_freq, batch_size):
@@ -411,8 +428,8 @@ def valid_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print
         cls_pred = torch.sigmoid(cls_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
   
@@ -420,7 +437,7 @@ def valid_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
 @torch.no_grad()
 def test_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print_freq, batch_size):
@@ -452,8 +469,8 @@ def test_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print_
         cls_pred = torch.sigmoid(cls_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
@@ -461,7 +478,7 @@ def test_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print_
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 
         # SEG+REC
@@ -494,9 +511,8 @@ def train_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, optimizer, de
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-    # Gather the stats from all processes
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+ 
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def valid_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, device, print_freq, batch_size):
@@ -527,14 +543,15 @@ def valid_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, device, print
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
   
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
 @torch.no_grad()
 def test_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, device, print_freq, batch_size):
@@ -565,14 +582,14 @@ def test_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, device, print_
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate()              # pred_seg must be round() !!
         metric_logger.update(dice=dice)
   
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 
     # Single
@@ -590,9 +607,9 @@ def train_Up_SMART_Net_Single_CLS(model, criterion, data_loader, optimizer, devi
         seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
         cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
 
-        cls_pred, seg_pred, rec_pred = model(inputs)
+        cls_pred = model(inputs)
 
-        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
+        loss, loss_detail = criterion(cls_pred=cls_pred, cls_gt=cls_gt)
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -607,9 +624,8 @@ def train_Up_SMART_Net_Single_CLS(model, criterion, data_loader, optimizer, devi
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-    # Gather the stats from all processes
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+ 
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def valid_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_freq, batch_size):
@@ -624,9 +640,9 @@ def valid_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_f
         seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
         cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
 
-        cls_pred, seg_pred, rec_pred = model(inputs)
+        cls_pred = model(inputs)
 
-        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
+        loss, loss_detail = criterion(cls_pred=cls_pred, cls_gt=cls_gt)
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -641,12 +657,12 @@ def valid_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_f
         cls_pred = torch.sigmoid(cls_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
 @torch.no_grad()
 def test_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_freq, batch_size):
@@ -661,9 +677,9 @@ def test_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_fr
         seg_gt  = batch_data["label"].squeeze(4).to(device)      # (B, C, H, W, 1) ---> (B, C, H, W)
         cls_gt  = seg_gt.flatten(1).bool().any(dim=1, keepdim=True).float() #  ---> (B, 1)
 
-        cls_pred, seg_pred, rec_pred = model(inputs)
+        cls_pred = model(inputs)
 
-        loss, loss_detail = criterion(cls_pred=cls_pred, seg_pred=seg_pred, rec_pred=rec_pred, cls_gt=cls_gt, seg_gt=seg_gt, rec_gt=inputs)
+        loss, loss_detail = criterion(cls_pred=cls_pred, cls_gt=cls_gt)
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -678,12 +694,12 @@ def test_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_fr
         cls_pred = torch.sigmoid(cls_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
      
         # SEG
 def train_Up_SMART_Net_Single_SEG(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size):
@@ -715,9 +731,8 @@ def train_Up_SMART_Net_Single_SEG(model, criterion, data_loader, optimizer, devi
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-    # Gather the stats from all processes
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+ 
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def valid_Up_SMART_Net_Single_SEG(model, criterion, data_loader, device, print_freq, batch_size):
@@ -748,10 +763,11 @@ def valid_Up_SMART_Net_Single_SEG(model, criterion, data_loader, device, print_f
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
 @torch.no_grad()
 def test_Up_SMART_Net_Single_SEG(model, criterion, data_loader, device, print_freq, batch_size):
@@ -782,10 +798,11 @@ def test_Up_SMART_Net_Single_SEG(model, criterion, data_loader, device, print_fr
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
         # REC        
 def train_Up_SMART_Net_Single_REC(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size):
@@ -816,9 +833,8 @@ def train_Up_SMART_Net_Single_REC(model, criterion, data_loader, optimizer, devi
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-    # Gather the stats from all processes
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+ 
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def valid_Up_SMART_Net_Single_REC(model, criterion, data_loader, device, print_freq, batch_size):
@@ -848,7 +864,7 @@ def valid_Up_SMART_Net_Single_REC(model, criterion, data_loader, device, print_f
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
 @torch.no_grad()
 def test_Up_SMART_Net_Single_REC(model, criterion, data_loader, device, print_freq, batch_size):
@@ -878,7 +894,7 @@ def test_Up_SMART_Net_Single_REC(model, criterion, data_loader, device, print_fr
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 
 ########################################################
@@ -894,25 +910,26 @@ def train_Down_SMART_Net_CLS(model, criterion, data_loader, optimizer, device, e
     if gradual_unfreeze:
         # Gradual Unfreezing
         # 10 epoch 씩 one stage block 풀기, 100 epoch까지는 아예 고정
-        if epoch <= 100:
-            freeze_params(model)
-        elif epoch >= 111:
+        if epoch >= 0 and epoch <= 100:
+            freeze_params(model.module.encoder) if hasattr(model, 'module') else freeze_params(model.encoder)
+            print("Freeze encoder ...!")
+        elif epoch >= 101 and epoch < 111:
             print("Unfreeze encoder.layer4 ...!")
-            unfreeze_params(model)
-        elif epoch >= 121:
+            unfreeze_params(model.module.encoder.layer4) if hasattr(model, 'module') else unfreeze_params(model.encoder.layer4)
+        elif epoch >= 111 and epoch < 121:
             print("Unfreeze encoder.layer3 ...!")
-            unfreeze_params(model)
-        elif epoch >= 131:
+            unfreeze_params(model.module.encoder.layer3) if hasattr(model, 'module') else unfreeze_params(model.encoder.layer3)
+        elif epoch >= 121 and epoch < 131:
             print("Unfreeze encoder.layer2 ...!")
-            unfreeze_params(model)        
-        elif epoch >= 141:
+            unfreeze_params(model.module.encoder.layer2) if hasattr(model, 'module') else unfreeze_params(model.encoder.layer2)
+        elif epoch >= 131 and epoch < 141:
             print("Unfreeze encoder.layer1 ...!")
-            unfreeze_params(model)
+            unfreeze_params(model.module.encoder.layer1) if hasattr(model, 'module') else unfreeze_params(model.encoder.layer1)
         else :
-            print("Unfreeze encoder.layer0 ...!")
-            unfreeze_params(model)
+            print("Unfreeze encoder.stem ...!")
+            unfreeze_params(model.module.encoder) if hasattr(model, 'module') else unfreeze_params(model.encoder)
     else :
-        freeze_params(model)
+        freeze_params(model.module.encoder) if hasattr(model, 'module') else freeze_params(model.encoder)
 
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
@@ -937,10 +954,9 @@ def train_Down_SMART_Net_CLS(model, criterion, data_loader, optimizer, device, e
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-    # Gather the stats from all processes
-    print("Averaged stats:", metric_logger)
+ 
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def valid_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, batch_size):
@@ -972,12 +988,12 @@ def valid_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, 
         cls_pred = torch.sigmoid(cls_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def test_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, batch_size):
@@ -990,6 +1006,7 @@ def test_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, b
         inputs  = batch_data["image"].to(device)                                                        # (B, C, H, W, D)
         cls_gt  = batch_data["label"].flatten(1).bool().any(dim=1, keepdim=True).float().to(device)     #  ---> (B, 1)
         depths  = batch_data["depths"]                                                                  #  ---> (B, 1) Fix bug, change cpu()
+        
 
         cls_pred = model(inputs, depths)
 
@@ -1008,12 +1025,12 @@ def test_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, b
         cls_pred = torch.sigmoid(cls_pred)
 
         # Metric CLS
-        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt).item()
-        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt).aggregate()   # pred_cls must be round() !!
+        auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
+        confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
         f1, acc, sen, spe   = confuse_metric.aggregate()
         metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
     # SEG
 def train_Down_SMART_Net_SEG(model, criterion, data_loader, optimizer, device, epoch, print_freq, batch_size, gradual_unfreeze):
@@ -1026,25 +1043,26 @@ def train_Down_SMART_Net_SEG(model, criterion, data_loader, optimizer, device, e
     if gradual_unfreeze:
         # Gradual Unfreezing
         # 10 epoch 씩 one stage block 풀기, 100 epoch까지는 아예 고정
-        if epoch <= 100:
-            freeze_params(model)
-        elif epoch >= 111:
+        if epoch >= 0 and epoch <= 100:
+            freeze_params(model.module.encoder) if hasattr(model, 'module') else freeze_params(model.encoder)
+            print("Freeze encoder ...!")
+        elif epoch >= 101 and epoch < 111:
             print("Unfreeze encoder.layer4 ...!")
-            unfreeze_params(model)
-        elif epoch >= 121:
+            unfreeze_params(model.module.encoder.layer4) if hasattr(model, 'module') else unfreeze_params(model.encoder.layer4)
+        elif epoch >= 111 and epoch < 121:
             print("Unfreeze encoder.layer3 ...!")
-            unfreeze_params(model)
-        elif epoch >= 131:
+            unfreeze_params(model.module.encoder.layer3) if hasattr(model, 'module') else unfreeze_params(model.encoder.layer3)
+        elif epoch >= 121 and epoch < 131:
             print("Unfreeze encoder.layer2 ...!")
-            unfreeze_params(model)        
-        elif epoch >= 141:
+            unfreeze_params(model.module.encoder.layer2) if hasattr(model, 'module') else unfreeze_params(model.encoder.layer2)
+        elif epoch >= 131 and epoch < 141:
             print("Unfreeze encoder.layer1 ...!")
-            unfreeze_params(model)
+            unfreeze_params(model.module.encoder.layer1) if hasattr(model, 'module') else unfreeze_params(model.encoder.layer1)
         else :
-            print("Unfreeze encoder.layer0 ...!")
-            unfreeze_params(model)
+            print("Unfreeze encoder.stem ...!")
+            unfreeze_params(model.module.encoder) if hasattr(model, 'module') else unfreeze_params(model.encoder)
     else :
-        freeze_params(model)
+        freeze_params(model.module.encoder) if hasattr(model, 'module') else freeze_params(model.encoder)
 
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
@@ -1068,10 +1086,9 @@ def train_Down_SMART_Net_SEG(model, criterion, data_loader, optimizer, device, e
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
-    # Gather the stats from all processes
-    print("Averaged stats:", metric_logger)
+ 
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def valid_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, batch_size):
@@ -1102,10 +1119,11 @@ def valid_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, 
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
 def test_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, batch_size):
@@ -1136,16 +1154,18 @@ def test_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, b
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate().item()              # pred_seg must be round() !!
+        result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
 
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+    return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 
 
 ########################################################
 ## Inference code 
 from monai.transforms import SaveImage
+from monai.transforms import Resize
 
     # SMAET-Net
 @torch.no_grad()
@@ -1175,21 +1195,21 @@ def infer_Up_SMART_Net(model, data_loader, device, print_freq, save_dir):
         cls_pred = torch.sigmoid(cls_pred)
         seg_pred = torch.sigmoid(seg_pred)
 
-        img_path_list.append(batch_data["img_path"][0])
-        img_list.append(batch_data["gt_img"][0])
-        cls_list.append(cls_pred)
-        seg_list.append(seg_pred)
-        rec_list.append(rec_pred)
+        img_path_list.append(batch_data["image_path"][0])
+        img_list.append(inputs.detach().cpu().squeeze())
+        cls_list.append(cls_pred.detach().cpu().squeeze())
+        seg_list.append(seg_pred.detach().cpu().squeeze())
+        rec_list.append(rec_pred.detach().cpu().squeeze())
         act_list.append(Activation_Map(activation['Activation Map']))
 
 
-    save_dict['gt_img_path']    = img_path_list
-    save_dict['gt_img']         = img_list
+    save_dict['img_path_list']  = img_path_list
+    save_dict['img_list']       = img_list
     save_dict['cls_pred']       = cls_list
     save_dict['seg_pred']       = seg_list
     save_dict['rec_pred']       = rec_list
     save_dict['activation_map'] = act_list
-    np.savez(save_dir + '.npz', result=save_dict) 
+    np.savez(save_dir + '/result.npz', result=save_dict) 
 
     # CLS
 @torch.no_grad()
@@ -1217,13 +1237,14 @@ def infer_Down_SMART_Net_CLS(model, data_loader, device, print_freq, save_dir):
         # Post-processing
         cls_pred = torch.sigmoid(cls_pred)
 
-        img_path_list.append(batch_data["img_path"][0])
-        img_list.append(batch_data["gt_img"][0])
-        cls_list.append(cls_pred)
+        img_path_list.append(batch_data["image_path"][0])
+        img_list.append(inputs.detach().cpu().squeeze())
+        cls_list.append(cls_pred.detach().cpu().squeeze())
         feat_list.append(features['feat'].detach().cpu().numpy())
 
-    save_dict['gt_img_path']    = img_path_list
-    save_dict['gt_img']         = img_list
+
+    save_dict['img_path_list']  = img_path_list
+    save_dict['img_list']       = img_list
     save_dict['cls_pred']       = cls_list
     save_dict['feat']           = feat_list
     np.savez(save_dir + '.npz', result=save_dict) 
@@ -1231,30 +1252,51 @@ def infer_Down_SMART_Net_CLS(model, data_loader, device, print_freq, save_dir):
 
     # SEG
 @torch.no_grad()
-def infer_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, save_dir):
+def infer_Down_SMART_Net_SEG(model, data_loader, device, print_freq, save_dir):
     # 3d patient-level based evaluate ...! 
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ", n=1)
     header = 'TEST:'
 
-    saver = SaveImage(output_dir=save_dir, 
+    image_saver = SaveImage(output_dir=save_dir, 
+                    output_postfix='Image', 
+                    output_ext='.nii.gz', 
+                    resample=True, 
+                    mode='bilinear', 
+                    squeeze_end_dims=True, 
+                    data_root_dir='', 
+                    separate_folder=False, 
+                    print_log=True)
+
+    label_saver = SaveImage(output_dir=save_dir, 
                     output_postfix='Pred', 
                     output_ext='.nii.gz', 
                     resample=True, 
                     mode='nearest', 
                     squeeze_end_dims=True, 
                     data_root_dir='', 
-                    separate_folder=True, 
+                    separate_folder=False, 
                     print_log=True)
+
+
 
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
-        inputs  = batch_data["image"].to(device)                                   # (B, C, H, W, D)
+        inputs  = batch_data["image"].to(device)  # (B, C, H, W, D)
 
         seg_pred = model(inputs)
 
         # post-processing
         seg_pred = torch.sigmoid(seg_pred)
 
-        # Save nii
-        saver(seg_pred.squeeze(0).round(), batch_data['image_meta_dict'])  # Note: image should be channel-first shape: [C,H,W,[D]].
+        # resize 512 x 512
+        inputs   = Resize(spatial_size=(512, 512, inputs.shape[-1]), mode='trilinear', align_corners=True)(inputs.detach().cpu().numpy().squeeze(0)) # Input = (C, H, W, D)
+        seg_pred = Resize(spatial_size=(512, 512, seg_pred.shape[-1]), mode='nearest', align_corners=None)(seg_pred.detach().cpu().numpy().squeeze(0).round()) # Input = (C, H, W, D)
+
+        # Save nii        
+        image_save_dict = batch_data['image_meta_dict'][0]
+        label_save_dict = batch_data['label_meta_dict'][0]
+        
+        image_saver(inputs, image_save_dict)    # Note: image should be channel-first shape: [C,H,W,[D]].
+        label_saver(seg_pred, label_save_dict)  # Note: image should be channel-first shape: [C,H,W,[D]].
+

@@ -20,3 +20,4 @@ SimpleITK
 torch                             
 torchvision                       
 tqdm                              
+pretrained_settings

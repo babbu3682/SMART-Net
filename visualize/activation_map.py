@@ -1,10 +1,10 @@
 import os
 import sys
 
-device = 'cuda'
-sys.path.append(os.path.abspath('/workspace/sunggu'))
-sys.path.append(os.path.abspath('/workspace/sunggu/1.Hemorrhage/utils/FINAL_utils'))
-sys.path.append(os.path.abspath('/workspace/sunggu/MONAI'))
+# device = 'cuda'
+# sys.path.append(os.path.abspath('/workspace/sunggu'))
+# sys.path.append(os.path.abspath('/workspace/sunggu/1.Hemorrhage/utils/FINAL_utils'))
+# sys.path.append(os.path.abspath('/workspace/sunggu/MONAI'))
 
 import torch
 import torch.nn as nn

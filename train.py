@@ -1,9 +1,4 @@
 import os
-import sys
-# sys.path.append(os.path.abspath('/workspace/sunggu'))
-# sys.path.append(os.path.abspath('/workspace/sunggu/MONAI'))
-# sys.path.append(os.path.abspath('/workspace/sunggu/1.Hemorrhage'))
-# sys.path.append(os.path.abspath('/workspace/sunggu/1.Hemorrhage/utils/FINAL_utils'))
 from pathlib import Path
 import argparse
 import datetime
@@ -12,8 +7,7 @@ import time
 import torch
 import json
 import random
-import functools
-
+# import functools
 
 import utils
 from create_model import create_model
@@ -22,10 +16,6 @@ from engine import *
 from losses import Uptask_Loss, Downtask_Loss
 from optimizers import create_optim
 from lr_schedulers import create_scheduler
-
-# pretrained_dict = {k: v for k, v in check_point['model_state_dict'].items() if k in model_dict and 'encoder.' in k} # if문에 있는 param만 가져오기
-# model_dict.update(pretrained_dict) 
-# model.load_state_dict(model_dict)     
 
 
 def str2bool(v):
@@ -47,7 +37,7 @@ def get_args_parser():
 
     # DataLoader setting
     parser.add_argument('--batch-size',  default=20, type=int)
-    parser.add_argument('--num_workers', default=10, type=int)
+    parser.add_argument('--num-workers', default=10, type=int)
     parser.add_argument('--pin-mem',    action='store_true', default=False, help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
 
     # Optimizer parameters
@@ -56,35 +46,34 @@ def get_args_parser():
     # Learning rate and schedule and Epoch parameters
     parser.add_argument('--lr-scheduler', default='poly_lr', type=str, metavar='lr_scheduler', help='lr_scheduler (default: "poly_learning_rate"')
     parser.add_argument('--epochs', default=1000, type=int, help='Upstream 1000 epochs, Downstream 500 epochs')  
-    parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='start epoch')
+    parser.add_argument('--start-epoch', default=0, type=int, metavar='N', help='start epoch')
     parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR', help='warmup learning rate (default: 1e-6)')
     parser.add_argument('--warmup-epochs', type=int, default=10, metavar='N', help='epochs to warmup LR, if scheduler supports')
     parser.add_argument('--lr', type=float, default=5e-4, metavar='LR', help='learning rate (default: 5e-4)')
     parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR', help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
 
-    ## Setting Upstream, Downstream task
+    # Setting Upstream, Downstream task
     parser.add_argument('--training-stream', default='Upstream', choices=['Upstream', 'Downstream'], type=str, help='training stream')  
 
     # DataParrel or Single GPU train
-    parser.add_argument('--multi-gpu-mode', default='DataParallel', choices=['DataParallel', 'Single'], type=str, help='multi-gpu-mode')          
-    parser.add_argument('--device',         default='cuda', help='device to use for training / testing')
-    parser.add_argument('--cuda-device-order', default='PCI_BUS_ID', type=str, help='cuda_device_order')
+    parser.add_argument('--multi-gpu-mode',       default='DataParallel', choices=['DataParallel', 'Single'], type=str, help='multi-gpu-mode')          
+    parser.add_argument('--device',               default='cuda', help='device to use for training / testing')
+    parser.add_argument('--cuda-device-order',    default='PCI_BUS_ID', type=str, help='cuda_device_order')
     parser.add_argument('--cuda-visible-devices', default='0', type=str, help='cuda_visible_devices')
 
     # Option
     parser.add_argument('--gradual-unfreeze',    type=str2bool, default="TRUE", help='gradual unfreezing the encoder for Downstream Task')
 
     # Continue Training
-    parser.add_argument('--resume',     default='',   help='resume from checkpoint')  # '' = None
-    parser.add_argument('--pretrained', default='',   help='pretrained from checkpoint')
-    parser.add_argument('--end2end',    type=str2bool, default="FALSE", help='Downtask option end2end')
+    parser.add_argument('--resume',           default='',  help='resume from checkpoint')  # '' = None
+    parser.add_argument('--from-pretrained',  default='',  help='pre-trained from checkpoint')
+    parser.add_argument('--load-weight-type', default='',  help='the types of loading the pre-trained weights')
 
     # Validation setting
     parser.add_argument('--print-freq', default=10, type=int, metavar='N', help='print frequency (default: 10)')
 
     # Prediction and Save setting
-    parser.add_argument('--output_dir', default='', help='path where to save, empty for no saving')
-    parser.add_argument('--seed', default=0, type=int)
+    parser.add_argument('--output-dir', default='', help='path where to save, empty for no saving')
 
     return parser
 
@@ -119,7 +108,7 @@ def main(args):
 
     # Select Model
     print(f"Creating model  : {args.model_name}")
-    print(f"Pretrained model: {args.pretrained}")
+    print(f"Pretrained model: {args.from_pretrained}")
     model = create_model(stream=args.training_stream, name=args.model_name)
     print(model)
 
@@ -154,18 +143,34 @@ def main(args):
                     state[k] = v.cuda()
 
 
-    # Pre-trained and End-to-End
+    # Using the pre-trained feature extract's weights
     if args.from_pretrained:
-        print("Loading... Pre-trained")       
-        print("Check Before weight = ", model.state_dict()['encoder.conv1.weight'][0])
-        checkpoint = torch.load(args.resume, map_location='cpu')
-        if args.load_weight_type == 'full':
-            model.load_state_dict(checkpoint['model_state_dict'])   
-        elif args.load_weight_type == 'encoder':
-            model.encoder.load_state_dict(checkpoint['model_state_dict'])   
-        print("Check After weight = ", model.state_dict()['encoder.conv1.weight'][0])
+        # ImageNet pre-trained from torchvision, Reference: https://github.com/pytorch/vision
+        if args.from_pretrained.split('/')[-1] == '[UpTASK]ResNet50_ImageNet.pth':
+            print("Loading... Pre-trained")      
+            model_dict = model.state_dict() 
+            print("Check Before weight = ", model_dict['encoder.conv1.weight'].std().item())
+            checkpoint_state_dict = torch.load(args.from_pretrained, map_location='cpu')
+            checkpoint_state_dict['conv1.weight'] = checkpoint_state_dict['conv1.weight'].sum(1, keepdim=True)   # ImageNet pre-trained is 3ch, so we have to change to 1 ch (using sum weight) Reference: https://github.com/qubvel/segmentation_models.pytorch/blob/master/segmentation_models_pytorch/encoders/_utils.py#L27
+            corrected_dict = {'encoder.'+k: v for k, v in checkpoint_state_dict.items()}
+            filtered_dict  = {k: v for k, v in corrected_dict.items() if (k in model_dict) and ('encoder.' in k)}
+            model_dict.update(filtered_dict)             
+            model.load_state_dict(model_dict)   
+            print("Check After weight  = ", model.state_dict()['encoder.conv1.weight'].std().item())
+        else :
+            print("Loading... Pre-trained")      
+            model_dict = model.state_dict() 
+            print("Check Before weight = ", model_dict['encoder.conv1.weight'].std().item())
+            checkpoint = torch.load(args.from_pretrained, map_location='cpu')
+            if args.load_weight_type == 'full':
+                model.load_state_dict(checkpoint['model_state_dict'])   
+            elif args.load_weight_type == 'encoder':
+                filtered_dict = {k: v for k, v in checkpoint['model_state_dict'].items() if (k in model_dict) and ('encoder.' in k)}
+                model_dict.update(filtered_dict)             
+                model.load_state_dict(model_dict)   
+            print("Check After weight  = ", model.state_dict()['encoder.conv1.weight'].std().item())
 
-
+    
 
     # Multi GPU
     if args.multi_gpu_mode == 'DataParallel':
@@ -177,7 +182,6 @@ def main(args):
         raise Exception('Error...! args.multi_gpu_mode')    
 
 
-    output_dir = Path(args.output_dir)
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
 
@@ -187,31 +191,46 @@ def main(args):
         # Train & Valid
         if args.training_stream == 'Upstream':
 
-            if args.model_name == 'SMART_Net':
+            if args.model_name == 'Up_SMART_Net':
                 train_stats = train_Up_SMART_Net(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
+                print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Up_SMART_Net(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
+                print("Averaged valid_stats: ", valid_stats)
             
             ## Dual    
             elif args.model_name == 'Up_SMART_Net_Dual_CLS_SEG':
                 train_stats = train_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
+                print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
+                print("Averaged valid_stats: ", valid_stats)
             elif args.model_name == 'Up_SMART_Net_Dual_CLS_REC':
                 train_stats = train_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
+                print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
+                print("Averaged valid_stats: ", valid_stats)
             elif args.model_name == 'Up_SMART_Net_Dual_SEG_REC':
                 train_stats = train_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
+                print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
+                print("Averaged valid_stats: ", valid_stats)
 
             ## Single
             elif args.model_name == 'Up_SMART_Net_Single_CLS':
                 train_stats = train_Up_SMART_Net_Single_CLS(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
+                print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Up_SMART_Net_Single_CLS(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
+                print("Averaged valid_stats: ", valid_stats)
             elif args.model_name == 'Up_SMART_Net_Single_SEG':
                 train_stats = train_Up_SMART_Net_Single_SEG(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
+                print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Up_SMART_Net_Single_SEG(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
+                print("Averaged valid_stats: ", valid_stats)
             elif args.model_name == 'Up_SMART_Net_Single_REC':
                 train_stats = train_Up_SMART_Net_Single_REC(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
+                print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Up_SMART_Net_Single_REC(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
+                print("Averaged valid_stats: ", valid_stats)
+            
             else : 
                 raise KeyError("Wrong model name `{}`".format(args.model_name))     
 
@@ -219,19 +238,22 @@ def main(args):
 
             if args.model_name == 'Down_SMART_Net_CLS':
                 train_stats = train_Down_SMART_Net_CLS(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size, args.gradual_unfreeze)
+                print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Down_SMART_Net_CLS(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
             elif args.model_name == 'Down_SMART_Net_SEG':
                 train_stats = train_Down_SMART_Net_SEG(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size, args.gradual_unfreeze)
+                print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Down_SMART_Net_SEG(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
             else :
                 raise KeyError("Wrong model name `{}`".format(args.model_name))     
+        
         else :
             raise KeyError("Wrong training stream `{}`".format(args.training_stream))        
 
 
 
-    # Save & Prediction png
-        checkpoint_paths = output_dir + '/epoch_'+str(epoch)+'_checkpoint.pth'
+        # Save & Prediction png
+        checkpoint_paths = args.output_dir + '/epoch_' + str(epoch) + '_checkpoint.pth'
         torch.save({
             'model_state_dict': model.state_dict() if args.multi_gpu_mode == 'Single' else model.module.state_dict(),
             'optimizer': optimizer.state_dict(),
@@ -245,7 +267,7 @@ def main(args):
                     'epoch': epoch}
         
         if args.output_dir:
-            with (output_dir / "log.txt").open("a") as f:
+            with open(args.output_dir + "/log.txt", "a") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
         lr_scheduler.step(epoch)

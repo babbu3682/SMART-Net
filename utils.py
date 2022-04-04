@@ -166,18 +166,25 @@ def to_tensor(x, dtype=None) -> torch.Tensor:
 def print_args(args):
     
     print('***********************************************')
-    print('*', ' '.ljust(9), 'Training Mode is ', args.training_mode.ljust(15), '*')
+    print('*', ' '.ljust(9), 'Training Mode is ', args.training_stream.ljust(15), '*')
     print('***********************************************')
-    print('Dataset Name: ', args.data_set)
+    print('Dataset Name: ', args.data_folder_dir)
     print('---------- Model ----------')
     print('Resume From: ', args.resume)
     print('Output To: ', args.output_dir)
-    print('Number of GPUs: ', args.world_size)
+    print('Visible GPUs: ', args.cuda_visible_devices)
     print('---------- Optimizer ----------')
     print('Learning Rate: ', args.lr)
-    print('Weight Decay: ', args.weight_decay)
     print('Batchsize: ', args.batch_size)
     
 
-
-
+def print_args_test(args):
+    
+    print('***********************************************')
+    print('*', ' '.ljust(9), 'TEST Mode is ', args.training_stream.ljust(15), '*')
+    print('***********************************************')
+    print('Dataset Name: ', args.data_folder_dir)
+    print('---------- Model ----------')
+    print('Resume From: ', args.resume)
+    print('Output To: ', args.output_dir)
+    print('Visible GPUs: ', args.cuda_visible_devices)

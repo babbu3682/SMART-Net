@@ -181,7 +181,7 @@ class Consistency_Loss(torch.nn.Module):
 
 ## Uptask Loss
 class Uptask_Loss(torch.nn.Module):
-    def __init__(self, name='SMART_Net'):
+    def __init__(self, name='Up_SMART_Net'):
         super().__init__()
         self.loss_cls     = torch.nn.BCEWithLogitsLoss()
         self.loss_seg     = Dice_BCE_Loss()
@@ -204,7 +204,7 @@ class Uptask_Loss(torch.nn.Module):
     #     return torch.exp(-uncert_w)*loss + 0.5*uncert_w        
 
     def forward(self, cls_pred=None, seg_pred=None, rec_pred=None, cls_gt=None, seg_gt=None, rec_gt=None):
-        if self.name == 'SMART_Net':
+        if self.name == 'Up_SMART_Net':
             loss_cls     = self.loss_cls(cls_pred, cls_gt)
             loss_seg     = self.loss_seg(seg_pred, seg_gt)
             loss_rec     = self.loss_rec(rec_pred, rec_gt)

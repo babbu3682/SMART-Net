@@ -7,7 +7,7 @@ from arch.smart_net import *
 def create_model(stream, name):
     if stream == 'Upstream':
         
-        if name == 'SMART_Net':
+        if name == 'Up_SMART_Net':
             model = Up_SMART_Net()     
 
         ## Dual    

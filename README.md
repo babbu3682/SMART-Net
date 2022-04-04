@@ -4,7 +4,7 @@ It's scheduled to be uploaded soon. We are modifying the code for easier use.
 We proposed a supervised multi-task aiding representation transfer learning network called <b>SMART-Net</b>.
 
 
-## Highlights
+## 💡 Highlights
 + Develop a robust feature extractor of brain hemorrhage in head & neck NCCT through three kinds of
 multi-task representation learning.
 + Propose the consistency loss to alleviate the disparity of two pretext tasks' heads, resulting in
@@ -26,7 +26,7 @@ This repository provides the official implementation of training SMART-Net as we
 
 <b>Improved performance and robustness of multi-task representation learning with consistency loss between pretexts for intracranial hemorrhage identification in head CT</b> <br/>
 [Sunggu Kyung](https://github.com/babbu3682)<sup>1</sup>, Keewon Shina, Hyunsu Jeongb, Ki Duk Kimb, Jooyoung Parka, Kyungjin Choa, Jeong Hyun Leec, Gil-Sun Hongc, and Namkug Kim <br/>
-MI2RL LAB
+MI2RL LAB <br/>
 <b>(Under revision...)</b> Medical Image Analysis (MedIA) <br/>
 <!-- [paper](https://arxiv.org/pdf/2004.07882.pdf) | [code](https://github.com/babbu3682/SMART-Net) | [graphical abstract](https://ars.els-cdn.com/content/image/1-s2.0-S1361841520302048-fx1_lrg.jpg) -->
 [code](https://github.com/babbu3682/SMART-Net)
@@ -38,7 +38,7 @@ MI2RL LAB
 + PyTorch 1.8.0
 
 
-## SMART-Net Framework
+## 📦 SMART-Net Framework
 ### 1. Clone the repository and install dependencies
 ```bash
 $ git clone https://github.com/babbu3682/SMART-Net.git
@@ -48,7 +48,8 @@ $ pip install -r requirements.txt
 
 ### 2. Preparing data
 #### For your convenience, we have provided a few 3D nii samples from AMC dataset as well as their mask labels.
-Download the data from [this repository](https://zenodo.org/record/4625321/files/TransVW_data.zip?download=1). You can use the [dicom2nift](https://github.com/icometrix/dicom2nifti) for converting from dicom to nii.
+<!-- Download the data from [this repository](https://zenodo.org/record/4625321/files/TransVW_data.zip?download=1).  -->
+You can use your own data using the [dicom2nift](https://github.com/icometrix/dicom2nifti) for converting from dicom to nii.
 
 - The processed hemorrhage directory structure
 ```
@@ -80,42 +81,58 @@ datasets/samples/
 ```
 
 ### 3. Upstream
-**train**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+
+#### 📋 Available List
+- [x] Up_SMART_Net
+- [x] Up_SMART_Net_Dual_CLS_SEG
+- [x] Up_SMART_Net_Dual_CLS_REC
+- [x] Up_SMART_Net_Dual_SEG_REC
+- [x] Up_SMART_Net_Single_CLS
+- [x] Up_SMART_Net_Single_SEG
+- [x] Up_SMART_Net_Single_REC
+
+
+**-train**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python -W ignore self_discovery/train_autoencoder.py 
 --data_dir dataset/ 
 ```
-**test slice-wise for slice-level**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+**-test (slice-wise for slice-level)**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python -W ignore self_discovery/train_autoencoder.py 
 --data_dir dataset/ 
 ```
-**test stacking slice for volume-level**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+**-test (stacking slice for volume-level)**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python -W ignore self_discovery/train_autoencoder.py 
 --data_dir dataset/ 
 ```
 
 ### 4. Downstream
-#### SMART-Net-CLS
-**train**: We conducted downstream training using multi-task representation.
+
+#### 📋 Available List
+- [x] Down_SMART_Net_CLS
+- [x] Down_SMART_Net_SEG
+
+#### - SMART-Net-CLS
+**-train**: We conducted downstream training using multi-task representation.
 ```bash
 python -W ignore self_discovery/train_autoencoder.py 
 --data_dir dataset/ 
 ```
-**test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+**-test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python -W ignore self_discovery/train_autoencoder.py 
 --data_dir dataset/ 
 ```
 
-#### SMART-Net-SEG
-**train**: We conducted downstream training using multi-task representation.
+#### - SMART-Net-SEG
+**-train**: We conducted downstream training using multi-task representation.
 ```bash
 python -W ignore self_discovery/train_autoencoder.py 
 --data_dir dataset/ 
 ```
-**test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+**-test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python -W ignore self_discovery/train_autoencoder.py 
 --data_dir dataset/ 
@@ -125,11 +142,11 @@ python -W ignore self_discovery/train_autoencoder.py
 ## Upstream visualize
 ### 1. Activation map
 ```
-It's scheduled to be uploaded soon.
+⏳ It's scheduled to be uploaded soon.
 ```
 ### 2. t-SNE
 ```
-It's scheduled to be uploaded soon.
+⏳ It's scheduled to be uploaded soon.
 ```
 
 
@@ -137,12 +154,16 @@ It's scheduled to be uploaded soon.
 For personal information security reasons of medical data, our data cannot be disclosed.
 
 
-## Citation
+## 📝 Citation
 If you use this code for your research, please cite our papers:
 ```
-It's scheduled to be uploaded soon.
+⏳ It's scheduled to be uploaded soon.
 ```
 
-## Acknowledgement
+## 🤝 Acknowledgement
 We build SMART-Net framework by referring to the released code at [qubvel/segmentation_models.pytorch](https://github.com/qubvel/segmentation_models.pytorch) and [Project-MONAI/MONAI](https://github.com/Project-MONAI/MONAI). 
 This is a patent-pending technology.
+
+
+### 🛡️ License <a name="license"></a>
+Project is distributed under [MIT License](https://github.com/babbu3682/SMART-Net/blob/main/LICENSE)

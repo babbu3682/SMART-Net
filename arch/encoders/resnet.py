@@ -21,6 +21,8 @@ Methods:
         also should support number of features according to specified depth, e.g. if depth = 5,
         number of feature tensors = 6 (one with same resolution as input and 5 downsampled),
         depth = 3 -> number of feature tensors = 4 (one with same resolution as input and 3 downsampled).
+
+Reference: https://github.com/qubvel/segmentation_models.pytorch/blob/master/segmentation_models_pytorch/encoders/resnet.py
 """
 
 import torch.nn as nn
@@ -40,8 +42,8 @@ class ResNetEncoder(ResNet, EncoderMixin):
         self._out_channels = out_channels
         self._in_channels = 3
         
-        # 수정 밑에 추가해서 새로 고침 한거!
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(1, 1), padding=(7//2, 7//2), bias=False)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=(7, 7), stride=(1, 1), padding=(7//2, 7//2), bias=False) # Revised the original code
+
         del self.fc
         del self.avgpool
 
