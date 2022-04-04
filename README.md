@@ -15,7 +15,6 @@ volume-level tasks.
 optimal 3D operators for volume-level ICH tasks.
 + Validate the model on multiple datasets with previous methods and ablation studies for the robustness
 and practicality of our method.
-Highlights
 
 
 <p align="center"><img width="100%" src="figures/graphical_abstract.png" /></p>
@@ -25,7 +24,7 @@ Highlights
 This repository provides the official implementation of training SMART-Net as well as the usage of the pre-trained SMART-Net in the following paper:
 
 <b>Improved performance and robustness of multi-task representation learning with consistency loss between pretexts for intracranial hemorrhage identification in head CT</b> <br/>
-[Sunggu Kyung](https://github.com/babbu3682)<sup>1</sup>, Keewon Shina, Hyunsu Jeongb, Ki Duk Kimb, Jooyoung Parka, Kyungjin Choa, Jeong Hyun Leec, Gil-Sun Hongc, and Namkug Kim <br/>
+[Sunggu Kyung](https://github.com/babbu3682)<sup>1</sup>, Keewon Shin, Hyunsu Jeong, Ki Duk Kim, Jooyoung Park, Kyungjin Cho, Jeong Hyun Lee, Gil-Sun Hong, and Namkug Kim <br/>
 [MI2RL LAB](https://www.mi2rl.co/) <br/>
 <b>(Under revision...)</b> Medical Image Analysis (MedIA) <br/>
 <!-- [paper](https://arxiv.org/pdf/2004.07882.pdf) | [code](https://github.com/babbu3682/SMART-Net) | [graphical abstract](https://ars.els-cdn.com/content/image/1-s2.0-S1361841520302048-fx1_lrg.jpg) -->
