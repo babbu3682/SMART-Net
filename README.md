@@ -92,7 +92,7 @@ datasets/samples/
 - [x] Up_SMART_Net_Single_REC
 
 
-**-train**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+**+ train**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python train.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
@@ -108,7 +108,7 @@ python train.py \
 --print-freq 1 \
 --output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test'
 ```
-**-test (slice-wise for slice-level)**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+**+ test (slice-wise for slice-level)**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python test.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
@@ -124,7 +124,7 @@ python test.py \
 --output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test' \
 --resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test/epoch_0_checkpoint.pth'
 ```
-**-test (stacking slice for volume-level)**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+**+ test (stacking slice for volume-level)**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python test.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
@@ -148,7 +148,7 @@ python test.py \
 - [x] Down_SMART_Net_SEG
 
 #### - SMART-Net-CLS
-**-train**: We conducted downstream training using multi-task representation.
+**+ train**: We conducted downstream training using multi-task representation.
 ```bash
 python train.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
@@ -166,7 +166,7 @@ python train.py \
 --from-pretrained '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/[UpTASK]ResNet50_ImageNet.pth' \
 --load-weight-type 'encoder'
 ```
-**-test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+**+ test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python test.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
@@ -185,7 +185,7 @@ python test.py \
 ```
 
 #### - SMART-Net-SEG
-**-train**: We conducted downstream training using multi-task representation.
+**+ train**: We conducted downstream training using multi-task representation.
 ```bash
 python train.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
@@ -203,7 +203,7 @@ python train.py \
 --from-pretrained '/workspace/sunggu/1.Hemorrhage/SMART-Net/up_test/epoch_0_checkpoint.pth' \
 --load-weight-type 'encoder'
 ```
-**-test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
+**+ test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
 python test.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
@@ -228,7 +228,7 @@ python test.py \
 - [x] Down_SMART_Net_SEG
 
 #### - SMART-Net
-**-inference**: We conducted downstream training using multi-task representation.
+**+ inference**: We conducted downstream training using multi-task representation.
 ```bash
 python inference.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
@@ -245,8 +245,8 @@ python inference.py \
 --resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test/epoch_0_checkpoint.pth'
 
 ```
-#### - SMART-Net-SEG
-**-inference**: We conducted downstream training using multi-task representation.
+#### - SMART-Net-CLS
+**+ inference**: We conducted downstream training using multi-task representation.
 ```bash
 python inference.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
@@ -264,7 +264,7 @@ python inference.py \
 
 ```
 #### - SMART-Net-SEG
-**-inference**: We conducted downstream training using multi-task representation.
+**+ inference**: We conducted downstream training using multi-task representation.
 ```bash
 python inference.py \
 --data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
