@@ -94,18 +94,51 @@ datasets/samples/
 
 **-train**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
-python -W ignore self_discovery/train_autoencoder.py 
---data_dir dataset/ 
+python train.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--model-name 'Up_SMART_Net' \
+--batch-size 10 \
+--epochs 1000 \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Upstream' \
+--multi-gpu-mode 'DataParallel' \
+--cuda-visible-devices '2, 3' \
+--gradual-unfreeze 'True' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test'
 ```
 **-test (slice-wise for slice-level)**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
-python -W ignore self_discovery/train_autoencoder.py 
---data_dir dataset/ 
+python test.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--test-dataset-name 'Custom' \
+--slice-wise-manner "True" \
+--model-name 'Up_SMART_Net' \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Upstream' \
+--multi-gpu-mode 'Single' \
+--cuda-visible-devices '2' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test' \
+--resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test/epoch_0_checkpoint.pth'
 ```
 **-test (stacking slice for volume-level)**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
-python -W ignore self_discovery/train_autoencoder.py 
---data_dir dataset/ 
+python test.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--test-dataset-name 'Custom' \
+--slice-wise-manner "False" \
+--model-name 'Up_SMART_Net' \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Upstream' \
+--multi-gpu-mode 'Single' \
+--cuda-visible-devices '2' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test' \
+--resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test/epoch_0_checkpoint.pth'
 ```
 
 ### 4. Downstream
@@ -117,25 +150,136 @@ python -W ignore self_discovery/train_autoencoder.py
 #### - SMART-Net-CLS
 **-train**: We conducted downstream training using multi-task representation.
 ```bash
-python -W ignore self_discovery/train_autoencoder.py 
---data_dir dataset/ 
+python train.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--model-name 'Down_SMART_Net_CLS' \
+--batch-size 2 \
+--epochs 1000 \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Downstream' \
+--multi-gpu-mode 'DataParallel' \
+--cuda-visible-devices '2, 3' \
+--gradual-unfreeze 'True' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_cls_test' \
+--from-pretrained '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/[UpTASK]ResNet50_ImageNet.pth' \
+--load-weight-type 'encoder'
 ```
 **-test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
-python -W ignore self_discovery/train_autoencoder.py 
---data_dir dataset/ 
+python test.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--test-dataset-name 'Custom' \
+--slice-wise-manner 'False' \
+--model-name 'Down_SMART_Net_CLS' \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Downstream' \
+--multi-gpu-mode 'Single' \
+--cuda-visible-devices '2' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_cls_test' \
+--resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_cls_test/epoch_0_checkpoint.pth'
+
 ```
 
 #### - SMART-Net-SEG
 **-train**: We conducted downstream training using multi-task representation.
 ```bash
-python -W ignore self_discovery/train_autoencoder.py 
---data_dir dataset/ 
+python train.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--model-name 'Down_SMART_Net_SEG' \
+--batch-size 2 \
+--epochs 1000 \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Downstream' \
+--multi-gpu-mode 'DataParallel' \
+--cuda-visible-devices '2, 3' \
+--gradual-unfreeze 'True' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_seg_test' \
+--from-pretrained '/workspace/sunggu/1.Hemorrhage/SMART-Net/up_test/epoch_0_checkpoint.pth' \
+--load-weight-type 'encoder'
 ```
 **-test**: We conducted upstream training with three multi-task including classificatiom, segmentation and reconstruction.
 ```bash
-python -W ignore self_discovery/train_autoencoder.py 
---data_dir dataset/ 
+python test.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--test-dataset-name 'Custom' \
+--slice-wise-manner 'False' \
+--model-name 'Down_SMART_Net_SEG' \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Downstream' \
+--multi-gpu-mode 'Single' \
+--cuda-visible-devices '2' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_seg_test' \
+--resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_seg_test/epoch_0_checkpoint.pth'
+
+```
+
+## SMART-Net Inference
+#### 📋 Available List
+- [x] Up_SMART_Net
+- [x] Down_SMART_Net_CLS
+- [x] Down_SMART_Net_SEG
+
+#### - SMART-Net
+**-inference**: We conducted downstream training using multi-task representation.
+```bash
+python inference.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--test-dataset-name 'Custom' \
+--slice-wise-manner "True" \
+--model-name 'Up_SMART_Net' \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Upstream' \
+--multi-gpu-mode 'Single' \
+--cuda-visible-devices '2' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test' \
+--resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/up_test/epoch_0_checkpoint.pth'
+
+```
+#### - SMART-Net-SEG
+**-inference**: We conducted downstream training using multi-task representation.
+```bash
+python inference.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--test-dataset-name 'Custom' \
+--slice-wise-manner "False" \
+--model-name 'Down_SMART_Net_CLS' \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Downstream' \
+--multi-gpu-mode 'Single' \
+--cuda-visible-devices '2' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_cls_test' \
+--resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_cls_test/epoch_0_checkpoint.pth'
+
+```
+#### - SMART-Net-SEG
+**-inference**: We conducted downstream training using multi-task representation.
+```bash
+python inference.py \
+--data-folder-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples' \
+--test-dataset-name 'Custom' \
+--slice-wise-manner "False" \
+--model-name 'Down_SMART_Net_SEG' \
+--num-workers 4 \
+--pin-mem \
+--training-stream 'Downstream' \
+--multi-gpu-mode 'Single' \
+--cuda-visible-devices '2' \
+--print-freq 1 \
+--output-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_seg_test/pred_nii' \
+--resume '/workspace/sunggu/1.Hemorrhage/SMART-Net/checkpoints/down_seg_test/epoch_0_checkpoint.pth'
+
 ```
 
 
