@@ -26,7 +26,7 @@ This repository provides the official implementation of training SMART-Net as we
 
 <b>Improved performance and robustness of multi-task representation learning with consistency loss between pretexts for intracranial hemorrhage identification in head CT</b> <br/>
 [Sunggu Kyung](https://github.com/babbu3682)<sup>1</sup>, Keewon Shina, Hyunsu Jeongb, Ki Duk Kimb, Jooyoung Parka, Kyungjin Choa, Jeong Hyun Leec, Gil-Sun Hongc, and Namkug Kim <br/>
-MI2RL LAB <br/>
+[MI2RL LAB](https://www.mi2rl.co/) <br/>
 <b>(Under revision...)</b> Medical Image Analysis (MedIA) <br/>
 <!-- [paper](https://arxiv.org/pdf/2004.07882.pdf) | [code](https://github.com/babbu3682/SMART-Net) | [graphical abstract](https://ars.els-cdn.com/content/image/1-s2.0-S1361841520302048-fx1_lrg.jpg) -->
 [code](https://github.com/babbu3682/SMART-Net)
