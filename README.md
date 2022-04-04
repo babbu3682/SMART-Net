@@ -47,7 +47,9 @@ $ pip install -r requirements.txt
 ```
 
 ### 2. Preparing data
-#### For your convenience, we have provided a few 3D nii samples from AMC dataset as well as their mask labels.
+#### For your convenience, we have provided few 3D nii samples from [Physionet publish dataset](https://physionet.org/content/ct-ich/1.3.1/) as well as their mask labels. 
+#### Note: We do not use this data as a train, it is just for code publishing examples.
+
 <!-- Download the data from [this repository](https://zenodo.org/record/4625321/files/TransVW_data.zip?download=1).  -->
 You can use your own data using the [dicom2nift](https://github.com/icometrix/dicom2nifti) for converting from dicom to nii.
 
@@ -295,7 +297,7 @@ python inference.py \
 
 
 ## Excuse
-For personal information security reasons of medical data, our data cannot be disclosed.
+For personal information security reasons of medical data in Korea, our data cannot be disclosed.
 
 
 ## 📝 Citation
