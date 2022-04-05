@@ -50,7 +50,7 @@ $ pip install -r requirements.txt
 #### Note: We do not use this data as a train, it is just for code publishing examples.
 
 <!-- Download the data from [this repository](https://zenodo.org/record/4625321/files/TransVW_data.zip?download=1).  -->
-You can use your own data using the [dicom2nift](https://github.com/icometrix/dicom2nifti) for converting from dicom to nii.
+You can use your own data using the [dicom2nifti](https://github.com/icometrix/dicom2nifti) for converting from dicom to nii.
 
 - The processed hemorrhage directory structure
 ```

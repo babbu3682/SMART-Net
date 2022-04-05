@@ -128,17 +128,23 @@ def valid_Up_SMART_Net(model, criterion, data_loader, device, print_freq, batch_
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
         # Metrics SEG
         result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
-        dice        = dice_metric.aggregate().item()              
-        metric_logger.update(dice=dice)
-  
+
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    dice               = dice_metric.aggregate().item()    
+    
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    metric_logger.update(dice=dice)
+    
+    confuse_metric.reset()
+    dice_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
@@ -175,17 +181,23 @@ def test_Up_SMART_Net(model, criterion, data_loader, device, print_freq, batch_s
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
         # Metrics SEG
         result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
-        dice        = dice_metric.aggregate().item()              
-        metric_logger.update(dice=dice)
   
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    dice               = dice_metric.aggregate().item()    
+    
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    metric_logger.update(dice=dice)
+
+    confuse_metric.reset()
+    dice_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
      
@@ -225,17 +237,23 @@ def test_Up_SMART_Net_Patient_Level(model, criterion, data_loader, device, print
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
         # Metrics SEG
         result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
-        dice        = dice_metric.aggregate().item()              
-        metric_logger.update(dice=dice)
   
         # # Metrics REC
         # mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         # metric_logger.update(mae=mae)
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    dice               = dice_metric.aggregate().item()    
+    
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    metric_logger.update(dice=dice)
+
+    confuse_metric.reset()
+    dice_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
@@ -308,14 +326,20 @@ def valid_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, device, print
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
 
         # Metrics SEG
         result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
-        dice        = dice_metric.aggregate().item()              
-        metric_logger.update(dice=dice)
-  
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    dice               = dice_metric.aggregate().item()    
+    
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    metric_logger.update(dice=dice)  
+
+    confuse_metric.reset()
+    dice_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
@@ -352,14 +376,20 @@ def test_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader, device, print_
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
 
         # Metrics SEG
         result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
-        dice        = dice_metric.aggregate().item()              
-        metric_logger.update(dice=dice)
-  
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    dice               = dice_metric.aggregate().item()    
+    
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    metric_logger.update(dice=dice)
+
+    confuse_metric.reset()
+    dice_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
@@ -430,12 +460,15 @@ def valid_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
   
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    confuse_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
@@ -471,13 +504,16 @@ def test_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader, device, print_
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
 
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
 
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    confuse_metric.reset()
+    
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 
@@ -544,12 +580,15 @@ def valid_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, device, print
 
         # Metrics SEG
         result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
-        dice        = dice_metric.aggregate().item()              
-        metric_logger.update(dice=dice)
   
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
+
+    # Aggregatation
+    dice               = dice_metric.aggregate().item()    
+    metric_logger.update(dice=dice)
+    dice_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
@@ -582,12 +621,17 @@ def test_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader, device, print_
         seg_pred = torch.sigmoid(seg_pred)
 
         # Metrics SEG
-        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt).aggregate()              # pred_seg must be round() !!
+        dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !!
         metric_logger.update(dice=dice)
   
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
         metric_logger.update(mae=mae)
+
+    # Aggregatation
+    dice               = dice_metric.aggregate().item()    
+    metric_logger.update(dice=dice)
+    dice_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
@@ -659,8 +703,11 @@ def valid_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_f
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    confuse_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
@@ -696,8 +743,11 @@ def test_Up_SMART_Net_Single_CLS(model, criterion, data_loader, device, print_fr
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    confuse_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
      
@@ -764,8 +814,11 @@ def valid_Up_SMART_Net_Single_SEG(model, criterion, data_loader, device, print_f
 
         # Metrics SEG
         result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
-        dice        = dice_metric.aggregate().item()              
-        metric_logger.update(dice=dice)
+
+    # Aggregatation
+    dice               = dice_metric.aggregate().item()    
+    metric_logger.update(dice=dice)
+    dice_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
     
@@ -799,8 +852,11 @@ def test_Up_SMART_Net_Single_SEG(model, criterion, data_loader, device, print_fr
 
         # Metrics SEG
         result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
-        dice        = dice_metric.aggregate().item()              
-        metric_logger.update(dice=dice)
+
+    # Aggregatation
+    dice               = dice_metric.aggregate().item()    
+    metric_logger.update(dice=dice)
+    dice_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
@@ -990,8 +1046,12 @@ def valid_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, 
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate()
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    confuse_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
@@ -1027,8 +1087,12 @@ def test_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, b
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
-        f1, acc, sen, spe   = confuse_metric.aggregate()
-        metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)
+
+
+    # Aggregatation
+    f1, acc, sen, spe  = confuse_metric.aggregate() 
+    metric_logger.update(auc=auc, f1=f1, acc=acc, sen=sen, spe=spe)          
+    confuse_metric.reset()
 
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
@@ -1123,6 +1187,11 @@ def valid_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, 
         dice        = dice_metric.aggregate().item()              
         metric_logger.update(dice=dice)
 
+    # Aggregatation
+    dice               = dice_metric.aggregate().item()    
+    metric_logger.update(dice=dice)
+    dice_metric.reset()
+
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
@@ -1155,9 +1224,12 @@ def test_Down_SMART_Net_SEG(model, criterion, data_loader, device, print_freq, b
 
         # Metrics SEG
         result_dice = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
-        dice        = dice_metric.aggregate().item()              
-        metric_logger.update(dice=dice)
 
+    # Aggregatation
+    dice               = dice_metric.aggregate().item()           
+    metric_logger.update(dice=dice)
+    dice_metric.reset()
+    
     return {k: round(meter.global_avg, 6) for k, meter in metric_logger.meters.items()}
 
 
