@@ -147,17 +147,12 @@ def Albu_2D_Transform_Compose(input):
                  albu.RandomContrast(limit=0.1, p=1),
              ], p=0.5
          ),
-         
-         albu.OneOf(
-             [
-                 albu.IAAAdditiveGaussianNoise(loc=0, scale=(0.005, 0.01), p=1),
-                 albu.GaussNoise(var_limit=(0.001, 0.005), p=1),
-             ], p=0.5
-         ),         
 
+         albu.GaussNoise(var_limit=(0.001, 0.005), p=0.5),
+        
          albu.OneOf(
              [
-                 albu.Blur(blur_limit=3, p=1),
+                 albu.GaussianBlur(blur_limit=3, p=1),
                  albu.MotionBlur(blur_limit=3, p=1),
                  albu.MedianBlur(blur_limit=3, p=1),
              ], p=0.5
@@ -173,12 +168,15 @@ def Albu_2D_Transform_Compose(input):
     return input
 
 def minmax_normalize(image, option=False):
-    image -= image.min()
-    image /= image.max() 
-    if option:
-        image = (image - 0.5) / 0.5                  # Range -1.0 ~ 1.0   @ We do not use -1~1 range becuase there is no Tanh act.
-    return image.astype('float32')
+    if len(np.unique(image)) != 1:  # Sometimes it cause the nan inputs...
+        image -= image.min()
+        image /= image.max() 
 
+    if option:
+        image = (image - 0.5) / 0.5  # Range -1.0 ~ 1.0   @ We do not use -1~1 range becuase there is no Tanh act.
+
+    return image.astype('float32')
+    
 def Filter_Zero_Depths(input):
     image = input['image'].squeeze(0)
     mask  = input['label'].squeeze(0)
@@ -304,7 +302,7 @@ def Hemo_Uptask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SM
                 Lambdad(keys=["image"], func=functools.partial(resize_keep_depths, size=256, mode='image')),                      # Resize Image                
                 Lambdad(keys=["label"], func=functools.partial(resize_keep_depths, size=256, mode='label')),                      # Resize Label                                
                 Crop_Non_Empty_Mask_If_Exists,                                                                                    # Sampling one hemorrhage slice with high probability in patient level nii data for 2D-based manner
-                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast
+                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast            
                 Lambdad(keys=["label"], func=functools.partial(delete_too_small_noise_keep_depths, min_size=3, connectivity=2)),  # Noise Reduction
                 
                 # Normalize
@@ -346,12 +344,85 @@ def Hemo_Uptask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SM
 
     return Dataset(data=data_dicts, transform=transforms), default_collate_fn
 
+
+    ## For Imbalance dataset but it is little slow ....
+def Hemo_Uptask_Imbalance_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples"):
+    if mode == 'pos':
+        img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/train/*hemo_img.nii.gz"))
+        label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/train/*hemo_mask.nii.gz"))
+        data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]        
+
+        print("Train [Total]  number = ", len(img_list))
+        print("Train [Hemo]   number = ", len([i for i in img_list if "_hemo_" in i]))
+
+        transforms = Compose(
+            [
+                # Load nii data
+                LoadImaged(keys=["image", "label"]),
+                AddChanneld(keys=["image", "label"]),
+                Orientationd(keys=["image", "label"], axcodes="PLS"),
+
+                # Pre-processing
+                ScaleIntensityRanged(keys=["image"], a_min=0.0, a_max=80.0, b_min=0.0, b_max=1.0, clip=True),                     # Windowing HU [min:0, max:80]
+                Filter_Zero_Depths,                                                                                               # Remove the empty slice
+                Lambdad(keys=["image"], func=functools.partial(resize_keep_depths, size=256, mode='image')),                      # Resize Image                
+                Lambdad(keys=["label"], func=functools.partial(resize_keep_depths, size=256, mode='label')),                      # Resize Label                                
+                Crop_Non_Empty_Mask_If_Exists,                                                                                    # Sampling one hemorrhage slice with high probability in patient level nii data for 2D-based manner
+                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast
+                Lambdad(keys=["label"], func=functools.partial(delete_too_small_noise_keep_depths, min_size=3, connectivity=2)),  # Noise Reduction
+                
+                # Augmentation
+                Albu_2D_Transform_Compose,                                            # 2D based Transform with keeping the depth slices
+                RandFlipd(keys=["image", "label"], spatial_axis=[0, 1], prob=0.5),    # 3D based Transform 
+                
+                # Normalize
+                Lambdad(keys=["image"], func=functools.partial(minmax_normalize, option=False)),
+                ToTensord(keys=["image", "label"])
+            ]
+        )   
+    else :
+        img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/train/*normal_img.nii.gz"))
+        label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/train/*normal_mask.nii.gz"))
+        data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]        
+
+        print("Train [Total]  number = ", len(img_list))
+        print("Train [Normal] number = ", len([i for i in img_list if "_normal_" in i]))
+
+        transforms = Compose(
+            [
+                # Load nii data
+                LoadImaged(keys=["image", "label"]),
+                AddChanneld(keys=["image", "label"]),
+                Orientationd(keys=["image", "label"], axcodes="PLS"),
+
+                # Pre-processing
+                ScaleIntensityRanged(keys=["image"], a_min=0.0, a_max=80.0, b_min=0.0, b_max=1.0, clip=True),                     # Windowing HU [min:0, max:80]
+                Filter_Zero_Depths,                                                                                               # Remove the empty slice
+                Lambdad(keys=["image"], func=functools.partial(resize_keep_depths, size=256, mode='image')),                      # Resize Image                
+                Lambdad(keys=["label"], func=functools.partial(resize_keep_depths, size=256, mode='label')),                      # Resize Label                                
+                Crop_Non_Empty_Mask_If_Exists,                                                                                    # Sampling one hemorrhage slice with high probability in patient level nii data for 2D-based manner
+                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast
+                Lambdad(keys=["label"], func=functools.partial(delete_too_small_noise_keep_depths, min_size=3, connectivity=2)),  # Noise Reduction
+                
+                # Augmentation
+                Albu_2D_Transform_Compose,                                            # 2D based Transform with keeping the depth slices
+                RandFlipd(keys=["image", "label"], spatial_axis=[0, 1], prob=0.5),    # 3D based Transform 
+                
+                # Normalize
+                Lambdad(keys=["image"], func=functools.partial(minmax_normalize, option=False)),
+                ToTensord(keys=["image", "label"])
+            ]
+        ) 
+
+    return Dataset(data=data_dicts, transform=transforms), default_collate_fn
+
+
     ## Down Task
 def Hemo_Downtask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples"):
     if mode == 'train':
         img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_img.nii.gz"))
         label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/train/*_mask.nii.gz"))
-        data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]        
+        data_dicts   = [{"image": image_name, "image_path": image_name, "label": label_name, "label_path": label_name} for image_name, label_name in zip(img_list, label_list)]        
 
         print("Train [Total]  number = ", len(img_list))
         print("Train [Hemo]   number = ", len([i for i in img_list if "_hemo_" in i]))
@@ -369,7 +440,7 @@ def Hemo_Downtask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/
                 Filter_Zero_Depths,                                                                                               # Remove the empty slice
                 Lambdad(keys=["image"], func=functools.partial(resize_keep_depths, size=256, mode='image')),                      # Resize Image                
                 Lambdad(keys=["label"], func=functools.partial(resize_keep_depths, size=256, mode='label')),                      # Resize Label                                
-                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast
+                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast         
                 Lambdad(keys=["label"], func=functools.partial(delete_too_small_noise_keep_depths, min_size=3, connectivity=2)),  # Noise Reduction
                 
                 # Augmentation
@@ -385,7 +456,7 @@ def Hemo_Downtask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/
     else :
         img_list     = list_sort_nicely(glob.glob(data_folder_dir + "/valid/*_img.nii.gz"))
         label_list   = list_sort_nicely(glob.glob(data_folder_dir + "/valid/*_mask.nii.gz"))
-        data_dicts   = [{"image": image_name, "label": label_name} for image_name, label_name in zip(img_list, label_list)]
+        data_dicts   = [{"image": image_name, "image_path": image_name, "label": label_name, "label_path": label_name} for image_name, label_name in zip(img_list, label_list)]        
 
         print("Valid [Total]  number = ", len(img_list))
         print("Valid [Hemo]   number = ", len([i for i in img_list if "_hemo_" in i]))
@@ -403,7 +474,7 @@ def Hemo_Downtask_Dataset(mode, data_folder_dir="/workspace/sunggu/1.Hemorrhage/
                 Filter_Zero_Depths,                                                                                               # Remove the empty slice
                 Lambdad(keys=["image"], func=functools.partial(resize_keep_depths, size=256, mode='image')),                      # Resize Image                
                 Lambdad(keys=["label"], func=functools.partial(resize_keep_depths, size=256, mode='label')),                      # Resize Label                                
-                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast
+                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast  
                 Lambdad(keys=["label"], func=functools.partial(delete_too_small_noise_keep_depths, min_size=3, connectivity=2)),  # Noise Reduction
                 
                 # Normalize
@@ -440,7 +511,7 @@ def Hemo_TEST_Dataset_Slicewise(test_dataset_name, data_folder_dir="/workspace/s
                 Lambdad(keys=["image"], func=functools.partial(resize_keep_depths, size=256, mode='image')),                      # Resize Image                
                 Lambdad(keys=["label"], func=functools.partial(resize_keep_depths, size=256, mode='label')),                      # Resize Label                                
                 Crop_Non_Empty_Mask_If_Exists,                                                                                    # Sampling one hemorrhage slice with high probability in patient level nii data for 2D-based manner                    
-                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast
+                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast       
                 Lambdad(keys=["label"], func=functools.partial(delete_too_small_noise_keep_depths, min_size=3, connectivity=2)),  # Noise Reduction
                                 
                 # Normalize
@@ -478,10 +549,10 @@ def Hemo_TEST_Dataset(test_dataset_name, data_folder_dir="/workspace/sunggu/1.He
 
                 # Pre-processing
                 ScaleIntensityRanged(keys=["image"], a_min=0.0, a_max=80.0, b_min=0.0, b_max=1.0, clip=True),                     # Windowing HU [min:0, max:80]
-                Filter_Zero_Depths,                                                                                               # Remove the empty slice
+                # Filter_Zero_Depths,                                                                                               # Remove the empty slice
                 Lambdad(keys=["image"], func=functools.partial(resize_keep_depths, size=256, mode='image')),                      # Resize Image                
                 Lambdad(keys=["label"], func=functools.partial(resize_keep_depths, size=256, mode='label')),                      # Resize Label                                
-                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast
+                Lambdad(keys=["image"], func=functools.partial(clahe_keep_depths, clipLimit=2.0, tileGridSize=(8, 8))),           # CLAHE for image contrast    
                 Lambdad(keys=["label"], func=functools.partial(delete_too_small_noise_keep_depths, min_size=3, connectivity=2)),  # Noise Reduction
                                 
                 # Normalize

@@ -11,7 +11,7 @@ import random
 
 import utils
 from create_model import create_model
-from create_datasets.prepare_datasets import build_dataset
+from create_datasets.prepare_datasets import build_dataset, build_dataset_imbalance
 from engine import *
 from losses import Uptask_Loss, Downtask_Loss
 from optimizers import create_optim
@@ -31,6 +31,7 @@ def get_args_parser():
 
     # Dataset parameters
     parser.add_argument('--data-folder-dir', default="/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples", type=str, help='dataset folder dirname')    
+    parser.add_argument('--imbalance-dataset',    type=str2bool, default="False", help='sampling the batch considering imbalance-dataset')
     
     # Model parameters
     parser.add_argument('--model-name', default='SMART_Net', type=str, help='model name')
@@ -47,7 +48,6 @@ def get_args_parser():
     parser.add_argument('--lr-scheduler', default='poly_lr', type=str, metavar='lr_scheduler', help='lr_scheduler (default: "poly_learning_rate"')
     parser.add_argument('--epochs', default=1000, type=int, help='Upstream 1000 epochs, Downstream 500 epochs')  
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N', help='start epoch')
-    parser.add_argument('--warmup-lr', type=float, default=1e-6, metavar='LR', help='warmup learning rate (default: 1e-6)')
     parser.add_argument('--warmup-epochs', type=int, default=10, metavar='N', help='epochs to warmup LR, if scheduler supports')
     parser.add_argument('--lr', type=float, default=5e-4, metavar='LR', help='learning rate (default: 5e-4)')
     parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR', help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
@@ -94,11 +94,25 @@ def main(args):
     device = torch.device(args.device)
 
     print("Loading dataset ....")
-    dataset_train, collate_fn_train = build_dataset(is_train=True,  args=args)   
-    dataset_valid, collate_fn_valid = build_dataset(is_train=False, args=args)
+    if args.imbalance_dataset:
+        # for highly imbalanced datasets. However, It is slow training...
+        dataset_train_pos, collate_fn_train_pos = build_dataset_imbalance(mode='pos',  args=args)   
+        dataset_train_neg, collate_fn_train_neg = build_dataset_imbalance(mode='neg',  args=args)   
+        dataset_valid, collate_fn_valid = build_dataset(is_train=False, args=args)
+        
+        data_loader_train_pos = torch.utils.data.DataLoader(dataset_train_pos, batch_size=args.batch_size//2, num_workers=args.num_workers//2, shuffle=True,  pin_memory=args.pin_mem, drop_last=True,  collate_fn=collate_fn_train_pos)
+        data_loader_train_neg = torch.utils.data.DataLoader(dataset_train_neg, batch_size=args.batch_size//2, num_workers=args.num_workers//2, shuffle=True,  pin_memory=args.pin_mem, drop_last=True,  collate_fn=collate_fn_train_neg)
+        data_loader_train     = (data_loader_train_pos, data_loader_train_neg)
+        data_loader_valid     = torch.utils.data.DataLoader(dataset_valid,     batch_size=1,                  num_workers=args.num_workers,    shuffle=False, pin_memory=args.pin_mem, drop_last=False, collate_fn=collate_fn_valid)
     
-    data_loader_train = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True,  pin_memory=args.pin_mem, drop_last=True,  collate_fn=collate_fn_train)
-    data_loader_valid = torch.utils.data.DataLoader(dataset_valid, batch_size=1,               num_workers=args.num_workers, shuffle=False, pin_memory=args.pin_mem, drop_last=False, collate_fn=collate_fn_valid)
+    else :
+        # for general balanced datasets
+        dataset_train, collate_fn_train = build_dataset(is_train=True,  args=args)   
+        dataset_valid, collate_fn_valid = build_dataset(is_train=False, args=args)
+        
+        data_loader_train = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True,  pin_memory=args.pin_mem, drop_last=True,  collate_fn=collate_fn_train)
+        data_loader_valid = torch.utils.data.DataLoader(dataset_valid, batch_size=1,               num_workers=args.num_workers, shuffle=False, pin_memory=args.pin_mem, drop_last=False, collate_fn=collate_fn_valid)
+                
 
     # Select Loss
     if args.training_stream == 'Upstream':
@@ -192,7 +206,10 @@ def main(args):
         if args.training_stream == 'Upstream':
 
             if args.model_name == 'Up_SMART_Net':
-                train_stats = train_Up_SMART_Net(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
+                if args.imbalance_dataset:
+                    train_stats = train_Up_Imbalance_SMART_Net(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
+                else :
+                    train_stats = train_Up_SMART_Net(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
                 print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Up_SMART_Net(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
                 print("Averaged valid_stats: ", valid_stats)
@@ -240,10 +257,12 @@ def main(args):
                 train_stats = train_Down_SMART_Net_CLS(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size, args.gradual_unfreeze)
                 print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Down_SMART_Net_CLS(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
+                print("Averaged valid_stats: ", valid_stats)
             elif args.model_name == 'Down_SMART_Net_SEG':
                 train_stats = train_Down_SMART_Net_SEG(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size, args.gradual_unfreeze)
                 print("Averaged train_stats: ", train_stats)
                 valid_stats = valid_Down_SMART_Net_SEG(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
+                print("Averaged valid_stats: ", valid_stats)
             else :
                 raise KeyError("Wrong model name `{}`".format(args.model_name))     
         

@@ -34,6 +34,7 @@ from pretrainedmodels.models.torchvision_models import pretrained_settings
 
 from ._base import EncoderMixin
 
+import torch
 
 class ResNetEncoder(ResNet, EncoderMixin):
     def __init__(self, out_channels, depth=5, **kwargs):
@@ -71,9 +72,6 @@ class ResNetEncoder(ResNet, EncoderMixin):
         # state_dict.pop("fc.bias")
         # state_dict.pop("fc.weight")
         super().load_state_dict(state_dict, **kwargs)
-
-    def feat_extract(self, x):
-        return x
 
 
 resnet_encoders = {

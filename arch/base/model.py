@@ -35,7 +35,6 @@ class Multi_Task_Model(torch.nn.Module):
 
         return labels, masks, restores
 
-
 ## Dual
     # CLS+SEG
 class Dual_Task_Model_CLS_SEG(torch.nn.Module):
