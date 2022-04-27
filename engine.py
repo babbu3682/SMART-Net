@@ -172,7 +172,7 @@ def valid_Up_SMART_Net(model, criterion, data_loader, device, print_freq, batch_
         confuse_matrix = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
 
         # Metrics SEG
-        result_dice    = dice_metric(y_pred=seg_pred.round(), y=seg_gt)              # pred_seg must be round() !! 
+        result_dice    = dice_metric(y_pred=seg_pred.round(), y=seg_gt)      # pred_seg must be round() !! 
 
         # Metrics REC
         mae = torch.nn.functional.l1_loss(input=rec_pred, target=inputs).item()
@@ -1076,8 +1076,6 @@ def train_Down_SMART_Net_CLS(model, criterion, data_loader, optimizer, device, e
             metric_logger.update(**loss_detail)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         
- 
-
     return {k: round(meter.global_avg, 7) for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
@@ -1129,7 +1127,7 @@ def test_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, b
     model.eval()
     metric_logger = utils.MetricLogger(delimiter="  ", n=batch_size)
     header = 'TEST:'
-    cls_list = []
+    
     for batch_data in metric_logger.log_every(data_loader, print_freq, header):
         
         inputs  = batch_data["image"].to(device)                                                        # (B, C, H, W, D)
@@ -1152,7 +1150,7 @@ def test_Down_SMART_Net_CLS(model, criterion, data_loader, device, print_freq, b
 
         # Post-processing
         cls_pred = torch.sigmoid(cls_pred)
-        cls_list.append(cls_pred)
+        
         # Metric CLS
         auc                 = auc_metric(y_pred=cls_pred, y=cls_gt)
         confuse_matrix      = confuse_metric(y_pred=cls_pred.round(), y=cls_gt)   # pred_cls must be round() !!
