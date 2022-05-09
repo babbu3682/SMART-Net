@@ -26,5 +26,5 @@ class ClassificationHead(nn.Sequential):
         pool = nn.AdaptiveAvgPool2d(1) if pooling == 'avg' else nn.AdaptiveMaxPool2d(1)
         flatten = Flatten()
         dropout = nn.Dropout(p=dropout, inplace=True) if dropout else nn.Identity()
-        linear = nn.Linear(in_channels, out_channels, bias=True)
+        linear  = nn.Linear(in_channels, out_channels, bias=True)
         super().__init__(pool, flatten, dropout, linear)
