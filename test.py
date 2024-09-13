@@ -8,7 +8,7 @@ import json
 import random
 
 import utils
-from dataloaders_test import get_dataloader
+from dataset import get_dataloader
 from models import test_get_model
 from engine import *
 
