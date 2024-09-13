@@ -22,10 +22,10 @@ and practicality of our method.
 ## Paper
 This repository provides the official implementation of training SMART-Net as well as the usage of the pre-trained SMART-Net in the following paper:
 
-<b>Improved performance and robustness of multi-task representation learning with consistency loss between pretexts for intracranial hemorrhage identification in head CT</b> <br/>
-[Sunggu Kyung](https://github.com/babbu3682)<sup>1</sup>, Keewon Shin, Hyunsu Jeong, Ki Duk Kim, Jooyoung Park, Kyungjin Cho, Jeong Hyun Lee, Gil-Sun Hong, and Namkug Kim <br/>
-[MI2RL LAB](https://www.mi2rl.co/) <br/>
-<b>Journal: Medical Image Analysis (MedIA) <br/>
+<b>Title:</b> Improved performance and robustness of multi-task representation learning with consistency loss between pretexts for intracranial hemorrhage identification in head CT<br/>
+<b>Authors:</b> [Sunggu Kyung](https://github.com/babbu3682)<sup>1</sup>, Keewon Shin, Hyunsu Jeong, Ki Duk Kim, Jooyoung Park, Kyungjin Cho, Jeong Hyun Lee, Gil-Sun Hong, and Namkug Kim <br/>
+<b>LAB:</b> [MI2RL LAB](https://www.mi2rl.co/) <br/>
+<b>Journal:</b> Medical Image Analysis (MedIA) <br/>
 
 <font size=3><div align='center' > [**Paper**](https://www.sciencedirect.com/science/article/pii/S1361841522001360) | [**Code**](https://github.com/babbu3682/SMART-Net)</div></font>
 
