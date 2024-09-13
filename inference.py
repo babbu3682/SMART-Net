@@ -34,7 +34,8 @@ def get_args_parser():
     
     # Model parameters
     parser.add_argument('--model-name', default='SMART_Net', type=str, help='model name')
-
+    parser.add_argument('--backbone', default='efficientnet-b7', type=str, help='backbone name')
+    
     # DataLoader setting
     parser.add_argument('--num-workers', default=10, type=int)
     parser.add_argument('--pin-mem',    action='store_true', default=False, help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
@@ -90,7 +91,7 @@ def main(args):
 
     # Select Model
     print(f"Creating model  : {args.model_name}")
-    model = create_model(stream=args.training_stream, name=args.model_name)
+    model = create_model(stream=args.training_stream, name=args.model_name, backbone=args.backbone)
     print(model)
 
 
@@ -113,7 +114,6 @@ def main(args):
 
 
 
-
     # Multi GPU
     if args.multi_gpu_mode == 'DataParallel':
         model = torch.nn.DataParallel(model)
@@ -126,15 +126,15 @@ def main(args):
 
     start_time = time.time()
 
-    # Whole LOOP
-
 
     # TEST
     if args.training_stream == 'Upstream':
 
         if args.model_name == 'Up_SMART_Net':
             if args.slice_wise_manner:
-                infer_Up_SMART_Net(model, data_loader_test, device, args.print_freq, args.output_dir)
+                test_stats = test_Up_SMART_Net(model, criterion, data_loader_test, device, args.print_freq, 1)
+            else :
+                test_stats = test_Up_SMART_Net_Patient_Level(model, criterion, data_loader_test, device, args.print_freq, 1)
 
         else : 
             raise KeyError("Wrong model name `{}`".format(args.model_name))     
@@ -152,15 +152,15 @@ def main(args):
         raise KeyError("Wrong training stream `{}`".format(args.training_stream))        
 
 
-
     # Finish
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Inference time {}'.format(total_time_str))
+    print('TEST time {}'.format(total_time_str))
+
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('SMART-Net Framework inference script', parents=[get_args_parser()])
+    parser = argparse.ArgumentParser('SMART-Net Framework training and evaluation script', parents=[get_args_parser()])
     args = parser.parse_args()
 
     if args.output_dir:

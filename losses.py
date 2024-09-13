@@ -1,271 +1,173 @@
-from typing import Optional, List
-
 import torch
-from torch import nn
+import torch.nn as nn
 import torch.nn.functional as F
+import random
+import numpy as np
+import functools
 
-from utils import to_tensor
-from torch.nn.modules.loss import _Loss
+def binary_dice_loss(y_true, y_pred, smooth=0.0, eps=1e-7, return_score=False):
+    bs = y_true.size(0)
+    y_true = y_true.view(bs, 1, -1)
+    y_pred = y_pred.view(bs, 1, -1)
 
+    intersection = torch.sum(y_true * y_pred, dim=(0, 2))
+    cardinality  = torch.sum(y_true + y_pred, dim=(0, 2))
 
-
-
-def soft_dice_score(output: torch.Tensor, target: torch.Tensor, smooth: float = 0.0, eps: float = 1e-7, dims=None,) -> torch.Tensor:
-    assert output.size() == target.size()
-    if dims is not None:
-        intersection = torch.sum(output * target, dim=dims)
-        cardinality = torch.sum(output + target, dim=dims)
+    dice_score = (2. * intersection + smooth) / (cardinality + smooth).clamp_min(eps)
+    dice_loss  = 1 - dice_score
+    if return_score:
+        return dice_score.mean()
     else:
-        intersection = torch.sum(output * target)
-        cardinality = torch.sum(output + target)
-    dice_score = (2.0 * intersection + smooth) / (cardinality + smooth).clamp_min(eps)
-    return dice_score
+        return dice_loss.mean()
 
-class DiceLoss(_Loss):
-    def __init__(
-        self,
-        mode: str,
-        classes: Optional[List[int]] = None,
-        log_loss: bool = False,
-        from_logits: bool = True,
-        smooth: float = 0.0,
-        ignore_index: Optional[int] = None,
-        eps: float = 1e-7,
-    ):
-        """Dice loss for image segmentation task.
-        It supports binary, multiclass and multilabel cases
-        Args:
-            mode: Loss mode 'binary', 'multiclass' or 'multilabel'
-            classes:  List of classes that contribute in loss computation. By default, all channels are included.
-            log_loss: If True, loss computed as `- log(dice_coeff)`, otherwise `1 - dice_coeff`
-            from_logits: If True, assumes input is raw logits
-            smooth: Smoothness constant for dice coefficient (a)
-            ignore_index: Label that indicates ignored pixels (does not contribute to loss)
-            eps: A small epsilon for numerical stability to avoid zero division error
-                (denominator will be always greater or equal to eps)
-        Shape
-             - **y_pred** - torch.Tensor of shape (N, C, H, W)
-             - **y_true** - torch.Tensor of shape (N, H, W) or (N, C, H, W)
-        Reference
-            https://github.com/BloodAxe/pytorch-toolbelt
-        """
-        assert mode in {'binary', 'multilabel', 'multiclass'}
-        super(DiceLoss, self).__init__()
-        self.mode = mode
-        if classes is not None:
-            assert mode != 'binary', "Masking classes is not supported with mode=binary"
-            classes = to_tensor(classes, dtype=torch.long)
+def binary_focal_loss(y_pred, y_true, gamma=2.0, alpha=0.25):
+    # alpha: Weight constant that penalize model for FNs (False Negatives)
+    logpt  = F.binary_cross_entropy(y_pred, y_true, reduction="none")
+    focal_term = (1.0 - torch.exp(-logpt)).pow(gamma)
+    loss = focal_term * logpt
+    loss *= alpha*y_true + (1-alpha)*(1-y_true)
+    return loss.mean()
 
-        self.classes = classes
-        self.from_logits = from_logits
-        self.smooth = smooth
-        self.eps = eps
-        self.log_loss = log_loss
-        self.ignore_index = ignore_index
+def binary_tversky_loss(y_pred, y_true, alpha=0.5, beta=0.5, smooth=0.0, eps=1e-7):
+    # With alpha == beta == 0.5, this loss becomes equal DiceLoss.
+    # alpha: Weight constant that penalize model for FPs (False Positives)
+    # beta: Weight constant that penalize model for FNs (False Negatives)    
+    bs = y_true.size(0)
+    y_true = y_true.view(bs, 1, -1)
+    y_pred = y_pred.view(bs, 1, -1)
 
-    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
+    intersection = torch.sum(y_true * y_pred, dim=(0, 2))
+    fp = torch.sum(y_pred * (1.0 - y_true), dim=(0, 2))
+    fn = torch.sum((1 - y_pred) * y_true, dim=(0, 2))
 
-        assert y_true.size(0) == y_pred.size(0)
+    tversky_score = (intersection + smooth) / (intersection + alpha * fp + beta * fn + smooth).clamp_min(eps)
+    tversky_loss  = 1 - tversky_score
+    return tversky_loss.mean()
 
-        if self.from_logits:
-            # Apply activations to get [0..1] class probabilities
-            # Using Log-Exp as this gives more numerically stable result and does not cause vanishing gradient on
-            # extreme values 0 and 1
-            if self.mode == 'multiclass':
-                y_pred = y_pred.log_softmax(dim=1).exp()
-            else:
-                y_pred = F.logsigmoid(y_pred).exp()
 
-        bs = y_true.size(0)
-        num_classes = y_pred.size(1)
-        dims = (0, 2)
 
-        if self.mode == 'binary':
-            y_true = y_true.view(bs, 1, -1)
-            y_pred = y_pred.view(bs, 1, -1)
+class MTL_Loss(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.loss_cls     = F.binary_cross_entropy
+        self.loss_seg     = binary_dice_loss
+        self.loss_rec     = F.l1_loss
+        self.loss_consist = F.mse_loss
 
-            if self.ignore_index is not None:
-                mask = y_true != self.ignore_index
-                y_pred = y_pred * mask
-                y_true = y_true * mask
+    def forward(self, pred_cls, pred_seg, pred_rec, label, mask, image, pooled_seg=None):
+        assert pred_cls.size() == label.size(), f"{pred_cls.size()} != {label.size()}"
+        assert pred_seg.size() == mask.size(),  f"{pred_seg.size()} != {mask.size()}"
+        assert pred_rec.size() == image.size(), f"{pred_rec.size()} != {image.size()}"
 
-        if self.mode == 'multiclass':
-            y_true = y_true.view(bs, -1)
-            y_pred = y_pred.view(bs, num_classes, -1)
+        cls_loss  = self.loss_cls(input=pred_cls, target=label)
+        seg_loss  = self.loss_seg(y_pred=pred_seg, y_true=mask)
+        rec_loss  = self.loss_rec(input=pred_rec, target=image)
 
-            if self.ignore_index is not None:
-                mask = y_true != self.ignore_index
-                y_pred = y_pred * mask.unsqueeze(1)
+        total_loss = cls_loss + seg_loss + rec_loss
+        loss_dict  = {"cls_loss": cls_loss.item(), "seg_loss": seg_loss.item(), "rec_loss": rec_loss.item()}
 
-                y_true = F.one_hot((y_true * mask).to(torch.long), num_classes)  # N,H*W -> N,H*W, C
-                y_true = y_true.permute(0, 2, 1) * mask.unsqueeze(1)  # H, C, H*W
-            else:
-                y_true = F.one_hot(y_true, num_classes)  # N,H*W -> N,H*W, C
-                y_true = y_true.permute(0, 2, 1)  # H, C, H*W
-
-        if self.mode == 'multilabel':
-            y_true = y_true.view(bs, num_classes, -1)
-            y_pred = y_pred.view(bs, num_classes, -1)
-
-            if self.ignore_index is not None:
-                mask = y_true != self.ignore_index
-                y_pred = y_pred * mask
-                y_true = y_true * mask
-
-        scores = self.compute_score(y_pred, y_true.type_as(y_pred), smooth=self.smooth, eps=self.eps, dims=dims)
-
-        if self.log_loss:
-            loss = -torch.log(scores.clamp_min(self.eps))
+        if pooled_seg is not None:
+            total_loss += self.loss_consist(pred_cls, pooled_seg)
+            loss_dict["consist_loss"] = self.loss_consist(pred_cls, pooled_seg).item()
+            return total_loss, loss_dict
         else:
-            loss = 1.0 - scores
+            return total_loss, loss_dict
 
-        # Dice loss is undefined for non-empty classes
-        # So we zero contribution of channel that does not have true pixels
-        # NOTE: A better workaround would be to use loss term `mean(y_pred)`
-        # for this case, however it will be a modified jaccard loss
+# class MTL_CLS_SEG_REC_Loss(torch.nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         self.loss_cls   = functools.partial(binary_focal_loss, gamma=0.0, alpha=0.7)
+        
+#         self.loss_seg_1 = functools.partial(binary_focal_loss, gamma=4.0, alpha=0.7)
+#         self.loss_seg_2 = functools.partial(binary_tversky_loss, alpha=0.3, beta=0.7, eps=1e-7)
+        
+#         self.loss_rec_l1 = F.l1_loss
 
-        mask = y_true.sum(dims) > 0
-        loss *= mask.to(loss.dtype)
+#     def forward(self, pred_cls, pred_seg, pred_rec, label, mask, image):
+#         assert pred_cls.size() == label.size(), f"{pred_cls.size()} != {label.size()}"
+#         assert pred_seg.size() == mask.size(),  f"{pred_seg.size()} != {mask.size()}"
+#         assert pred_rec.size() == image.size(), f"{pred_rec.size()} != {image.size()}"
 
-        if self.classes is not None:
-            loss = loss[self.classes]
+#         cls_loss   = self.loss_cls(y_pred=pred_cls, y_true=label)
+#         seg_loss1  = self.loss_seg_1(y_pred=pred_seg, y_true=mask)
+#         seg_loss2  = self.loss_seg_2(y_pred=pred_seg, y_true=mask)
 
-        return self.aggregate_loss(loss)
+#         rec_loss   = self.loss_rec_l1(pred_rec, image)
+        
+#         return cls_loss + seg_loss1 + seg_loss2 + rec_loss, {"cls_loss": cls_loss, "seg_loss1": seg_loss1, "seg_loss2": seg_loss2, "rec_loss": rec_loss}
+                                                                
+# class MTL_CLS_SEG_REC_Loss_2(torch.nn.Module):
+#     def __init__(self):
+#         super().__init__()
+#         self.loss_cls_bce  = F.binary_cross_entropy
+        
+#         self.loss_seg_dice = binary_dice_loss
+#         self.loss_seg_bce  = F.binary_cross_entropy
+        
+#         self.loss_rec_l1   = F.l1_loss
 
-    def aggregate_loss(self, loss):
-        return loss.mean()
+#     def forward(self, pred_cls, pred_seg, pred_rec, label, mask, image):
+#         assert pred_cls.size() == label.size(), f"{pred_cls.size()} != {label.size()}"
+#         assert pred_seg.size() == mask.size(),  f"{pred_seg.size()} != {mask.size()}"
+#         assert pred_rec.size() == image.size(), f"{pred_rec.size()} != {image.size()}"
+        
+#         cls_bce_loss  = self.loss_cls_bce(input=pred_cls, target=label)
 
-    def compute_score(self, output, target, smooth=0.0, eps=1e-7, dims=None) -> torch.Tensor:
-        return soft_dice_score(output, target, smooth, eps, dims)
+#         seg_dice_loss = self.loss_seg_dice(y_pred=pred_seg, y_true=mask)
+#         seg_bce_loss  = self.loss_seg_bce(input=pred_seg, target=mask)
 
-class Dice_BCE_Loss(torch.nn.Module):
+#         rec_l1_loss   = self.loss_rec_l1(pred_rec, image)
+        
+#         return cls_bce_loss + seg_dice_loss + seg_bce_loss + rec_l1_loss, {"cls_bce_loss": cls_bce_loss, "seg1_dice_loss": seg_dice_loss, "seg2_bce_loss": seg_bce_loss, "rec_l1_loss": rec_l1_loss}
+
+
+# 3D - 2D transfer
+class CLS_Loss(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.loss_function_1 = DiceLoss(mode='binary', from_logits=True)
-        self.loss_function_2 = torch.nn.BCEWithLogitsLoss()
-        self.dice_weight     = 1.0   
-        self.bce_weight      = 1.0   
+        self.loss_cls_bce          = F.binary_cross_entropy
+        # self.loss_cls_binary_focal = functools.partial(binary_focal_loss, gamma=0.0, alpha=0.7)
 
-    def forward(self, y_pred, y_true):
-        dice_loss  = self.loss_function_1(y_pred, y_true)
-        bce_loss   = self.loss_function_2(y_pred, y_true)
+    def forward(self, pred_cls, label):
+        # print(logit_cls.shape, logit_seg.shape, logit_det.shape, logit_rec.shape, logit_idx.shape, label.shape, mask.shape, bbox.shape, image.shape, idx.shape)
+        assert pred_cls.size() == label.size(), f"{pred_cls.size()} != {label.size()}"
+        
+        cls_bce_loss           = self.loss_cls_bce(input=pred_cls, target=label)
+        # cls_binary_focal_loss  = self.loss_cls_binary_focal(y_pred=pred_cls, y_true=label)
 
-        return self.dice_weight*dice_loss + self.bce_weight*bce_loss
+        # return cls_bce_loss + cls_binary_focal_loss, {'cls_bce_loss': cls_bce_loss, 'cls_binary_focal_loss': cls_binary_focal_loss}
+        return cls_bce_loss, {'cls_bce_loss': cls_bce_loss}
 
-class Consistency_Loss(torch.nn.Module):
+class SEG_Loss(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.L2_loss  = torch.nn.MSELoss()
-        self.maxpool  = torch.nn.MaxPool2d(kernel_size=16, stride=16, padding=0)
-        self.avgpool  = torch.nn.AvgPool2d(kernel_size=16, stride=16, padding=0)
+        self.loss_seg_dice = binary_dice_loss
+        self.loss_seg_bce  = F.binary_cross_entropy
 
-    def forward(self, y_cls, y_seg):
-        y_cls = torch.sigmoid(y_cls)  # (B, C)
-        y_seg = torch.sigmoid(y_seg)  # (B, C, H, W)
+    def forward(self, pred_seg, mask):
+        assert pred_seg.size() == mask.size(), f"{pred_seg.size()} != {mask.size()}"
+        seg_dice_loss = self.loss_seg_dice(y_pred=pred_seg, y_true=mask)
+        seg_bce_loss  = self.loss_seg_bce(input=pred_seg, target=mask)
 
-        # We have to adjust the segmentation pred depending on classification pred
-        # ResNet50 uses four 2x2 maxpools and 1 global avgpool to extract classification pred. that is the same as 16x16 maxpool and 16x16 avgpool
-        y_seg = self.avgpool(self.maxpool(y_seg)).flatten(start_dim=1, end_dim=-1)  # (B, C)
-        loss  = self.L2_loss(y_seg, y_cls)
-
-        return loss
-
-# To Do
-# 1. using Contrastive Learning for Consistency_Loss
-# 2. uncertainty for losses weights
+        return seg_dice_loss + seg_bce_loss, {"seg_dice_loss": seg_dice_loss, "seg_bce_loss": seg_bce_loss}
 
 
 
 
-###################################################################################
+def get_loss(name):
+    # 2D
+    if name == 'MTL_Loss':
+        return MTL_Loss()                   
+    
+    # elif name == 'MTL_CLS_SEG_REC_Loss_2':
+    #     return MTL_CLS_SEG_REC_Loss_2()                       
 
-## Uptask Loss
-class Uptask_Loss(torch.nn.Module):
-    def __init__(self, name='Up_SMART_Net'):
-        super().__init__()
-        self.loss_cls     = torch.nn.BCEWithLogitsLoss()
-        self.loss_seg     = Dice_BCE_Loss()
-        self.loss_rec     = torch.nn.L1Loss()
-        self.loss_consist = Consistency_Loss()
-        
-        self.name           = name
-        self.cls_weight     = 1.0
-        self.seg_weight     = 1.0
-        self.rec_weight     = 1.0
-        self.consist_weight = 0.5
+    # 3D - 2D transfer
+    elif name == 'CLS_Loss':
+        return CLS_Loss()    
 
-        # We will consider uncertainty loss weight...! (To Do...)
-        # if uncert:
-        #     self.cls_weight       = nn.Parameter(torch.tensor([1.0], requires_grad=True, device='cuda'))
-        #     self.seg_weight       = nn.Parameter(torch.tensor([1.0], requires_grad=True, device='cuda'))
-        #     self.consist_weight   = nn.Parameter(torch.tensor([1.0], requires_grad=True, device='cuda'))
+    elif name == 'SEG_Loss':
+        return SEG_Loss()    
 
-    # def cal_weighted_loss(self, loss, uncert_w):
-    #     return torch.exp(-uncert_w)*loss + 0.5*uncert_w        
-
-    def forward(self, cls_pred=None, seg_pred=None, rec_pred=None, cls_gt=None, seg_gt=None, rec_gt=None):
-        if self.name == 'Up_SMART_Net':
-            loss_cls     = self.loss_cls(cls_pred, cls_gt)
-            loss_seg     = self.loss_seg(seg_pred, seg_gt)
-            loss_rec     = self.loss_rec(rec_pred, rec_gt)
-            loss_consist = self.loss_consist(y_cls=cls_pred, y_seg=seg_pred)
-            total        = self.cls_weight*loss_cls + self.seg_weight*loss_seg + self.rec_weight*loss_rec + self.consist_weight*loss_consist
-            return total, {'CLS_Loss':(self.cls_weight*loss_cls).item(), 'SEG_Loss':(self.seg_weight*loss_seg).item(), 'REC_Loss':(self.rec_weight*loss_rec).item(), 'Consist_Loss':(self.consist_weight*loss_consist).item()}
-        
-        elif self.name == 'Up_SMART_Net_Dual_CLS_SEG':
-            loss_cls     = self.loss_cls(cls_pred, cls_gt)
-            loss_seg     = self.loss_seg(seg_pred, seg_gt)
-            total        = self.cls_weight*loss_cls + self.seg_weight*loss_seg
-            return total, {'CLS_Loss':(self.cls_weight*loss_cls).item(), 'SEG_Loss':(self.seg_weight*loss_seg).item()}
-
-        elif self.name == 'Up_SMART_Net_Dual_CLS_REC':
-            loss_cls     = self.loss_cls(cls_pred, cls_gt)
-            loss_rec     = self.loss_rec(rec_pred, rec_gt)
-            total        = self.cls_weight*loss_cls + self.rec_weight*loss_rec
-            return total, {'CLS_Loss':(self.cls_weight*loss_cls).item(), 'REC_Loss':(self.rec_weight*loss_rec).item()}
-
-        elif self.name == 'Up_SMART_Net_Dual_SEG_REC':
-            loss_seg     = self.loss_seg(seg_pred, seg_gt)
-            loss_rec     = self.loss_rec(rec_pred, rec_gt)
-            total        = self.seg_weight*loss_seg + self.rec_weight*loss_rec
-            return total, {'SEG_Loss':(self.seg_weight*loss_seg).item(), 'REC_Loss':(self.rec_weight*loss_rec).item()}
-
-        elif self.name == 'Up_SMART_Net_Single_CLS':
-            loss_cls     = self.loss_cls(cls_pred, cls_gt)
-            total        = self.cls_weight*loss_cls 
-            return total, {'CLS_Loss':(self.cls_weight*loss_cls).item()}
-
-        elif self.name == 'Up_SMART_Net_Single_SEG':
-            loss_seg     = self.loss_seg(seg_pred, seg_gt)
-            total        = self.seg_weight*loss_seg
-            return total, {'SEG_Loss':(self.seg_weight*loss_seg).item()}
-
-        elif self.name == 'Up_SMART_Net_Single_REC':
-            loss_rec     = self.loss_rec(rec_pred, rec_gt)
-            total        = self.rec_weight*loss_rec
-            return total, {'REC_Loss':(self.rec_weight*loss_rec).item()}
-
-        else :
-            raise KeyError("Wrong Loss name `{}`".format(self.name))  
-
-
-## Downtask Loss
-class Downtask_Loss(torch.nn.Module):
-    def __init__(self, name='Down_SMART_Net_CLS'):
-        super().__init__()
-        self.loss_cls     = torch.nn.BCEWithLogitsLoss()
-        self.loss_seg     = Dice_BCE_Loss()
-        self.name         = name
-
-
-    def forward(self, cls_pred=None, seg_pred=None, cls_gt=None, seg_gt=None):
-        if self.name == 'Down_SMART_Net_CLS':
-            loss_cls = self.loss_cls(cls_pred, cls_gt)
-            return loss_cls, {'CLS_Loss':loss_cls.item()}
-        
-        elif self.name == 'Down_SMART_Net_SEG':
-            loss_seg = self.loss_seg(seg_pred, seg_gt)
-            return loss_seg, {'SEG_Loss':loss_seg.item()}
-
-        else :
-            raise KeyError("Wrong Loss name `{}`".format(self.name))     
+    else:
+        raise NotImplementedError

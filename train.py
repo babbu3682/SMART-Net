@@ -6,16 +6,16 @@ import time
 import torch
 import json
 import random
-from pathlib import Path
-# import functools
+from torch.utils.tensorboard import SummaryWriter
+from collections import defaultdict
 
 import utils
-from create_model import create_model
-from create_datasets.prepare_datasets import build_dataset, build_dataset_imbalance
+from dataset import get_dataloader
+from models import get_model
+from schedulers import get_scheduler
+from losses import get_loss
+from optimizers import get_optimizer
 from engine import *
-from losses import Uptask_Loss, Downtask_Loss
-from optimizers import create_optim
-from lr_schedulers import create_scheduler
 
 
 def str2bool(v):
@@ -30,283 +30,186 @@ def get_args_parser():
     parser = argparse.ArgumentParser('SMART-Net Framework Train and Test script', add_help=False)
 
     # Dataset parameters
-    parser.add_argument('--data-folder-dir', default="/workspace/sunggu/1.Hemorrhage/SMART-Net/datasets/samples", type=str, help='dataset folder dirname')    
-    parser.add_argument('--imbalance-dataset',    type=str2bool, default="False", help='sampling the batch considering imbalance-dataset')
+    parser.add_argument('--dataset',          default='ldctiqa',  type=str, help='dataset name')    
+    parser.add_argument('--train-batch-size',       default=72, type=int)
+    parser.add_argument('--valid-batch-size',       default=72, type=int)
+    parser.add_argument('--train-num-workers',      default=10, type=int)
+    parser.add_argument('--valid-num-workers',      default=10, type=int)
     
     # Model parameters
-    parser.add_argument('--model-name', default='SMART_Net', type=str, help='model name')
+    parser.add_argument('--model',                     default='Unet',  type=str, help='model name')    
+    parser.add_argument('--transfer-pretrained',       default=None,    type=str, help='encoder-pretrained')    
+    parser.add_argument('--use-pretrained-encoder',    default=True,    type=bool, help='model name')    
+    parser.add_argument('--use-pretrained-decoder',    default=True,    type=bool, help='model name')    
+    parser.add_argument('--freeze-encoder',            default=True,    type=bool, help='model name')    
+    parser.add_argument('--freeze-decoder',            default=True,    type=bool, help='model name')    
+    parser.add_argument('--roi_size',                  default=512,     type=int, help='model name')
+    parser.add_argument('--sw_batch_size',             default=32,      type=int, help='model name')    
+    parser.add_argument('--backbone',                  default='resnet-50',  type=str, choices=['resnet-50', 'efficientnet-b7', 'maxvit-xlarge'], help='model name')    
+    parser.add_argument('--use_skip',                  default=True,    type=bool, help='model name')
+    parser.add_argument('--use_consist',               default=True,    type=bool, help='model name')
+    parser.add_argument('--pool_type',                 default='gem',   type=str, help='model name')
+    parser.add_argument('--operator_3d',               default='LSTM',  type=str, help='model name')
 
-    # DataLoader setting
-    parser.add_argument('--batch-size',  default=20, type=int)
-    parser.add_argument('--num-workers', default=10, type=int)
-    parser.add_argument('--pin-mem',    action='store_true', default=False, help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
+    # Loss parameters
+    parser.add_argument('--loss',             default='dice_loss',  type=str, help='loss name')
 
-    # Optimizer parameters
-    parser.add_argument('--optimizer', default='adam', type=str, metavar='OPTIMIZER', help='Optimizer (default: "adam"')
-    
-    # Learning rate and schedule and Epoch parameters
-    parser.add_argument('--lr-scheduler', default='poly_lr', type=str, metavar='lr_scheduler', help='lr_scheduler (default: "poly_learning_rate"')
-    parser.add_argument('--epochs', default=1000, type=int, help='Upstream 1000 epochs, Downstream 500 epochs')  
-    parser.add_argument('--start-epoch', default=0, type=int, metavar='N', help='start epoch')
-    parser.add_argument('--warmup-epochs', type=int, default=10, metavar='N', help='epochs to warmup LR, if scheduler supports')
-    parser.add_argument('--lr', type=float, default=5e-4, metavar='LR', help='learning rate (default: 5e-4)')
-    parser.add_argument('--min-lr', type=float, default=1e-5, metavar='LR', help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
+    # Training parameters - Optimizer, LR, Scheduler, Epoch
+    parser.add_argument('--optimizer',        default='adamw', type=str, metavar='OPTIMIZER', help='Optimizer (default: "AdamW"')
+    parser.add_argument('--scheduler',        default='poly_lr', type=str, metavar='scheduler', help='scheduler (default: "poly_learning_rate"')
+    parser.add_argument('--epochs',           default=1000, type=int, help='Upstream 1000 epochs, Downstream 500 epochs')  
+    parser.add_argument('--lr',               default=5e-4, type=float, metavar='LR', help='learning rate (default: 5e-4)')
+    parser.add_argument('--min-lr',           default=1e-5, type=float, metavar='LR', help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
+    parser.add_argument('--warmup-epochs',    default=10, type=int, metavar='N', help='epochs to warmup LR, if scheduler supports')    
 
-    # Setting Upstream, Downstream task
-    parser.add_argument('--training-stream', default='Upstream', choices=['Upstream', 'Downstream'], type=str, help='training stream')  
+    # Continue Training (Resume)
+    parser.add_argument('--from-pretrained',  default='',  help='pre-trained from checkpoint')
+    parser.add_argument('--resume',           default='',  help='resume from checkpoint')  # '' = None
 
     # DataParrel or Single GPU train
-    parser.add_argument('--multi-gpu-mode',       default='DataParallel', choices=['DataParallel', 'Single'], type=str, help='multi-gpu-mode')          
-    parser.add_argument('--device',               default='cuda', help='device to use for training / testing')
-    parser.add_argument('--cuda-device-order',    default='PCI_BUS_ID', type=str, help='cuda_device_order')
-    parser.add_argument('--cuda-visible-devices', default='0', type=str, help='cuda_visible_devices')
+    parser.add_argument('--multi-gpu-mode',   default='DataParallel', choices=['DataParallel', 'Single'], type=str, help='multi-gpu-mode')          
+    parser.add_argument('--device',           default='cuda', help='device to use for training / testing')
 
-    # Option
-    parser.add_argument('--gradual-unfreeze',    type=str2bool, default="TRUE", help='gradual unfreezing the encoder for Downstream Task')
-
-    # Continue Training
-    parser.add_argument('--resume',           default='',  help='resume from checkpoint')  # '' = None
-    parser.add_argument('--from-pretrained',  default='',  help='pre-trained from checkpoint')
-    parser.add_argument('--load-weight-type', default='',  help='the types of loading the pre-trained weights')
-
-    # Validation setting
-    parser.add_argument('--print-freq', default=10, type=int, metavar='N', help='print frequency (default: 10)')
-
-    # Prediction and Save setting
-    parser.add_argument('--output-dir', default='', help='path where to save, empty for no saving')
-
+    # Save setting
+    parser.add_argument('--save-dir',         default='', help='path where to prediction PNG save')
+    parser.add_argument('--memo',             default='', help='memo for script')
     return parser
 
 
-# Fix random seeds for reproducibility
+# fix random seeds for reproducibility
 random_seed = 42
 torch.manual_seed(random_seed)
 torch.cuda.manual_seed(random_seed)
 torch.cuda.manual_seed_all(random_seed) 
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
+# torch.backends.cudnn.enabled = False
 np.random.seed(random_seed)
 random.seed(random_seed)
+import torch
 
+# MAIN
 def main(args):
-           
+    print(torch.__version__)
+    print(torch.backends.cudnn.version())    
+    start_epoch = 0
     utils.print_args(args)
     device = torch.device(args.device)
 
-    print("Loading dataset ....")
-    if args.imbalance_dataset:
-        # for highly imbalanced datasets. However, It is slow training...
-        dataset_train_pos, collate_fn_train_pos = build_dataset_imbalance(mode='pos',  args=args)   
-        dataset_train_neg, collate_fn_train_neg = build_dataset_imbalance(mode='neg',  args=args)   
-        dataset_valid, collate_fn_valid = build_dataset(is_train=False, args=args)
-        
-        data_loader_train_pos = torch.utils.data.DataLoader(dataset_train_pos, batch_size=args.batch_size//2, num_workers=args.num_workers//2, shuffle=True,  pin_memory=args.pin_mem, drop_last=True,  collate_fn=collate_fn_train_pos)
-        data_loader_train_neg = torch.utils.data.DataLoader(dataset_train_neg, batch_size=args.batch_size//2, num_workers=args.num_workers//2, shuffle=True,  pin_memory=args.pin_mem, drop_last=True,  collate_fn=collate_fn_train_neg)
-        data_loader_train     = (data_loader_train_pos, data_loader_train_neg)
-        data_loader_valid     = torch.utils.data.DataLoader(dataset_valid,     batch_size=1,                  num_workers=args.num_workers,    shuffle=False, pin_memory=args.pin_mem, drop_last=False, collate_fn=collate_fn_valid)
-    
+    # Dataset
+    train_loader = get_dataloader(name=args.dataset, mode='train', batch_size=args.train_batch_size, num_workers=args.train_num_workers, roi_size=args.roi_size, operator_3d=args.operator_3d)
+    valid_loader = get_dataloader(name=args.dataset, mode='valid', batch_size=args.valid_batch_size, num_workers=args.valid_num_workers, roi_size=args.roi_size, operator_3d=args.operator_3d)
+
+    # Model
+    model = get_model(args)
+
+    # Pretrained
+    if args.from_pretrained:
+        print("Loading... Pretrained")
+        checkpoint = torch.load(args.from_pretrained)
+        model.load_state_dict(checkpoint['model_state_dict'])
+
+    # Multi-GPU & CUDA
+    if args.multi_gpu_mode == 'DataParallel':
+        model = torch.nn.DataParallel(model)         
+        model = model.to(device)
     else :
-        # for general balanced datasets
-        dataset_train, collate_fn_train = build_dataset(is_train=True,  args=args)   
-        dataset_valid, collate_fn_valid = build_dataset(is_train=False, args=args)
-        
-        data_loader_train = torch.utils.data.DataLoader(dataset_train, batch_size=args.batch_size, num_workers=args.num_workers, shuffle=True,  pin_memory=args.pin_mem, drop_last=True,  collate_fn=collate_fn_train)
-        data_loader_valid = torch.utils.data.DataLoader(dataset_valid, batch_size=1,               num_workers=args.num_workers, shuffle=False, pin_memory=args.pin_mem, drop_last=False, collate_fn=collate_fn_valid)
-                
+        model = model.to(device)
 
-    # Select Loss
-    if args.training_stream == 'Upstream':
-        criterion = Uptask_Loss(name=args.model_name)
-    else :
-        criterion = Downtask_Loss(name=args.model_name)
-
-    # Select Model
-    print(f"Creating model  : {args.model_name}")
-    print(f"Pretrained model: {args.from_pretrained}")
-    model = create_model(stream=args.training_stream, name=args.model_name)
-    print(model)
-
-    # Optimizer & LR Scheduler
-    optimizer    = create_optim(name=args.optimizer, model=model, args=args)
-    lr_scheduler = create_scheduler(name=args.lr_scheduler, optimizer=optimizer, args=args)
-
+    # Optimizer & LR Schedule & Loss
+    optimizer = get_optimizer(name=args.optimizer, model=model, lr=args.lr)
+    scheduler = get_scheduler(name=args.scheduler, optimizer=optimizer, warm_up_epoch=10, start_decay_epoch=args.epochs/10, total_epoch=args.epochs, min_lr=1e-6)
+    criterion = get_loss(name=args.loss)
 
     # Resume
     if args.resume:
         print("Loading... Resume")
-        checkpoint = torch.load(args.resume, map_location='cpu')
-        model.load_state_dict(checkpoint['model_state_dict'])        
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])        
-        args.start_epoch = checkpoint['epoch'] + 1  
-        try:
-            log_path = os.path.dirname(args.resume)+'/log.txt'
-            lines    = open(log_path,'r').readlines()
-            val_loss_list = []
-            for l in lines:
-                exec('log_dict='+l.replace('NaN', '0'))
-                val_loss_list.append(log_dict['valid_loss'])
-            print("Epoch: ", np.argmin(val_loss_list), " Minimum Val Loss ==> ", np.min(val_loss_list))
-        except:
-            pass
+        start_epoch, model, optimizer, scheduler = utils.load_checkpoint(model, optimizer, scheduler, filename=args.resume)
 
-        # Optimizer Error fix...!
-        for state in optimizer.state.values():
-            for k, v in state.items():
-                if torch.is_tensor(v):
-                    state[k] = v.cuda()
+    # Tensorboard
+    tensorboard = SummaryWriter(args.save_dir + '/runs')
 
-
-    # Using the pre-trained feature extract's weights
-    if args.from_pretrained:
-        # ImageNet pre-trained from torchvision, Reference: https://github.com/pytorch/vision
-        if args.from_pretrained.split('/')[-1] == '[UpTASK]ResNet50_ImageNet.pth':
-            print("Loading... Pre-trained")      
-            model_dict = model.state_dict() 
-            print("Check Before weight = ", model_dict['encoder.conv1.weight'].std().item())
-            checkpoint_state_dict = torch.load(args.from_pretrained, map_location='cpu')
-            checkpoint_state_dict['conv1.weight'] = checkpoint_state_dict['conv1.weight'].sum(1, keepdim=True)   # ImageNet pre-trained is 3ch, so we have to change to 1 ch (using sum weight) Reference: https://github.com/qubvel/segmentation_models.pytorch/blob/master/segmentation_models_pytorch/encoders/_utils.py#L27
-            corrected_dict = {'encoder.'+k: v for k, v in checkpoint_state_dict.items()}
-            filtered_dict  = {k: v for k, v in corrected_dict.items() if (k in model_dict) and ('encoder.' in k)}
-            model_dict.update(filtered_dict)             
-            model.load_state_dict(model_dict)   
-            print("Check After weight  = ", model.state_dict()['encoder.conv1.weight'].std().item())
-        else :
-            print("Loading... Pre-trained")      
-            model_dict = model.state_dict() 
-            print("Check Before weight = ", model_dict['encoder.conv1.weight'].std().item())
-            checkpoint = torch.load(args.from_pretrained, map_location='cpu')
-            if args.load_weight_type == 'full':
-                model.load_state_dict(checkpoint['model_state_dict'])   
-            elif args.load_weight_type == 'encoder':
-                filtered_dict = {k: v for k, v in checkpoint['model_state_dict'].items() if (k in model_dict) and ('encoder.' in k)}
-                model_dict.update(filtered_dict)             
-                model.load_state_dict(model_dict)   
-            print("Check After weight  = ", model.state_dict()['encoder.conv1.weight'].std().item())
-
-    
-
-    # Multi GPU
-    if args.multi_gpu_mode == 'DataParallel':
-        model = torch.nn.DataParallel(model)
-        model.to(device)
-    elif args.multi_gpu_mode == 'Single':
-        model.to(device)
-    else :
-        raise Exception('Error...! args.multi_gpu_mode')    
-
-
+    # Etc traing setting
     print(f"Start training for {args.epochs} epochs")
-    start_time = time.time()
+    start_time = time.time()    
 
-    # Whole LOOP
-    for epoch in range(args.start_epoch, args.epochs):
+    # Whole Loop Train & Valid 
+    for epoch in range(start_epoch, args.epochs):
 
-        # Train & Valid
-        if args.training_stream == 'Upstream':
+        # 2D
+        if args.model == 'SMART-Net-2D':
+            train_stats = train_smartnet_2d(train_loader, model, criterion, optimizer, device, epoch, args.use_consist)
+            print("Averaged train_stats: ", train_stats)
+            for key, value in train_stats.items():
+                tensorboard.add_scalar(f'Train Stats/{key}', value, epoch)            
+            valid_stats = valid_smartnet_2d(valid_loader, model, device, epoch, args.save_dir, args.use_consist)
+            print("Averaged valid_stats: ", valid_stats)
+            for key, value in valid_stats.items():
+                tensorboard.add_scalar(f'Valid Stats/{key}', value, epoch)  
 
-            if args.model_name == 'Up_SMART_Net':
-                if args.imbalance_dataset:
-                    train_stats = train_Up_Imbalance_SMART_Net(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
-                else :
-                    train_stats = train_Up_SMART_Net(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
-                print("Averaged train_stats: ", train_stats)
-                valid_stats = valid_Up_SMART_Net(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
-                print("Averaged valid_stats: ", valid_stats)
-            
-            ## Dual    
-            elif args.model_name == 'Up_SMART_Net_Dual_CLS_SEG':
-                train_stats = train_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
-                print("Averaged train_stats: ", train_stats)
-                valid_stats = valid_Up_SMART_Net_Dual_CLS_SEG(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
-                print("Averaged valid_stats: ", valid_stats)
-            elif args.model_name == 'Up_SMART_Net_Dual_CLS_REC':
-                train_stats = train_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
-                print("Averaged train_stats: ", train_stats)
-                valid_stats = valid_Up_SMART_Net_Dual_CLS_REC(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
-                print("Averaged valid_stats: ", valid_stats)
-            elif args.model_name == 'Up_SMART_Net_Dual_SEG_REC':
-                train_stats = train_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
-                print("Averaged train_stats: ", train_stats)
-                valid_stats = valid_Up_SMART_Net_Dual_SEG_REC(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
-                print("Averaged valid_stats: ", valid_stats)
+        # 3D - 2D transfer
+        elif args.model == 'SMART-Net-3D-CLS':
+            train_stats = train_smartnet_3d_2dtransfer_CLS(train_loader, model, criterion, optimizer, device, epoch)
+            print("Averaged train_stats: ", train_stats)
+            for key, value in train_stats.items():
+                tensorboard.add_scalar(f'Train Stats/{key}', value, epoch)            
+            valid_stats = valid_smartnet_3d_2dtransfer_CLS(valid_loader, model, device, epoch, args.save_dir)
+            print("Averaged valid_stats: ", valid_stats)
+            for key, value in valid_stats.items():
+                tensorboard.add_scalar(f'Valid Stats/{key}', value, epoch)                      
 
-            ## Single
-            elif args.model_name == 'Up_SMART_Net_Single_CLS':
-                train_stats = train_Up_SMART_Net_Single_CLS(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
-                print("Averaged train_stats: ", train_stats)
-                valid_stats = valid_Up_SMART_Net_Single_CLS(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
-                print("Averaged valid_stats: ", valid_stats)
-            elif args.model_name == 'Up_SMART_Net_Single_SEG':
-                train_stats = train_Up_SMART_Net_Single_SEG(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
-                print("Averaged train_stats: ", train_stats)
-                valid_stats = valid_Up_SMART_Net_Single_SEG(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
-                print("Averaged valid_stats: ", valid_stats)
-            elif args.model_name == 'Up_SMART_Net_Single_REC':
-                train_stats = train_Up_SMART_Net_Single_REC(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size)
-                print("Averaged train_stats: ", train_stats)
-                valid_stats = valid_Up_SMART_Net_Single_REC(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
-                print("Averaged valid_stats: ", valid_stats)
-            
-            else : 
-                raise KeyError("Wrong model name `{}`".format(args.model_name))     
+        elif args.model == 'SMART-Net-3D-SEG':
+            train_stats = train_smartnet_3d_2dtransfer_SEG(train_loader, model, criterion, optimizer, device, epoch)
+            print("Averaged train_stats: ", train_stats)
+            for key, value in train_stats.items():
+                tensorboard.add_scalar(f'Train Stats/{key}', value, epoch)            
+            valid_stats = valid_smartnet_3d_2dtransfer_SEG(valid_loader, model, device, epoch, args.save_dir)
+            print("Averaged valid_stats: ", valid_stats)
+            for key, value in valid_stats.items():
+                tensorboard.add_scalar(f'Valid Stats/{key}', value, epoch)                                      
 
-        elif args.training_stream == 'Downstream':
+        # LR update
+        scheduler.step()
 
-            if args.model_name == 'Down_SMART_Net_CLS':
-                train_stats = train_Down_SMART_Net_CLS(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size, args.gradual_unfreeze)
-                print("Averaged train_stats: ", train_stats)
-                valid_stats = valid_Down_SMART_Net_CLS(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
-                print("Averaged valid_stats: ", valid_stats)
-            elif args.model_name == 'Down_SMART_Net_SEG':
-                train_stats = train_Down_SMART_Net_SEG(model, criterion, data_loader_train, optimizer, device, epoch, args.print_freq, args.batch_size, args.gradual_unfreeze)
-                print("Averaged train_stats: ", train_stats)
-                valid_stats = valid_Down_SMART_Net_SEG(model, criterion, data_loader_valid, device, args.print_freq, args.batch_size)
-                print("Averaged valid_stats: ", valid_stats)
-            else :
-                raise KeyError("Wrong model name `{}`".format(args.model_name))     
-        
-        else :
-            raise KeyError("Wrong training stream `{}`".format(args.training_stream))        
-
-
-
-        # Save & Prediction png
-        checkpoint_paths = args.output_dir + '/epoch_' + str(epoch) + '_checkpoint.pth'
+        # Save checkpoint
         torch.save({
-            'model_state_dict': model.state_dict() if args.multi_gpu_mode == 'Single' else model.module.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'lr_scheduler': lr_scheduler.state_dict(),
             'epoch': epoch,
-            'args': args,
-        }, checkpoint_paths)
+            'model_state_dict': model.module.state_dict() if args.multi_gpu_mode == 'DataParallel' else model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
+        }, args.save_dir + '/weights/epoch_' + str(epoch) + '_checkpoint.pth')
 
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                    **{f'valid_{k}': v for k, v in valid_stats.items()},
-                    'epoch': epoch}
-        
-        if args.output_dir:
-            with open(args.output_dir + "/log.txt", "a") as f:
-                f.write(json.dumps(log_stats) + "\n")
+        # Log text
+        log_stats = {**{f'{k}': v for k, v in train_stats.items()}, 
+                    **{f'{k}': v for k, v in valid_stats.items()}, 
+                    'epoch': epoch,
+                    'lr': optimizer.param_groups[0]['lr']}
 
-        lr_scheduler.step(epoch)
-
+        with open(args.save_dir + "/log.txt", "a") as f:
+            f.write(json.dumps(log_stats) + "\n")
 
     # Finish
-    total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+    tensorboard.close()
+    total_time_str = str(datetime.timedelta(seconds=int(time.time()-start_time)))
     print('Training time {}'.format(total_time_str))
 
 
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser('SMART-Net Framework training and evaluation script', parents=[get_args_parser()])
-    args   = parser.parse_args()
+    parser = argparse.ArgumentParser('train script', parents=[get_args_parser()])
+    args = parser.parse_args()
 
-    if args.output_dir:
-        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-        
-    os.environ["CUDA_DEVICE_ORDER"]     =  args.cuda_device_order
-    os.environ["CUDA_VISIBLE_DEVICES"]  =  args.cuda_visible_devices        
-    
+
+    # Make folder if not exist
+    os.makedirs(args.save_dir, exist_ok =True)
+    os.makedirs(args.save_dir + "/args", exist_ok =True)
+    os.makedirs(args.save_dir + "/weights", exist_ok =True)
+    os.makedirs(args.save_dir + "/predictions", exist_ok =True)
+    os.makedirs(args.save_dir + "/runs", exist_ok =True)
+
+    # Save args to json
+    the_time = datetime.datetime.now().strftime("%y%m%d_%H%M")
+    if not os.path.isfile(args.save_dir + "/args/args_" + the_time + ".json"):
+        with open(args.save_dir + "/args/args_" + the_time + ".json", "w") as f:
+            json.dump(args.__dict__, f, indent=2)
+       
     main(args)

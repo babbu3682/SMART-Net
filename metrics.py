@@ -1,10 +1,16 @@
+from sklearn.metrics import accuracy_score, recall_score, f1_score
+import numpy as np
 
-from monai.metrics.utils import MetricReduction
-from monai.metrics import ROCAUCMetric, DiceMetric, ConfusionMatrixMetric 
+def accuracy(y_true, y_pred):
+    return accuracy_score(y_true, y_pred)
 
+def sensitivity(y_true, y_pred):
+    return recall_score(y_true, y_pred)
 
-## Metric 
-dice_metric    = DiceMetric(include_background=True, reduction=MetricReduction.MEAN, get_not_nans=False)
-dice_metric1   = DiceMetric(include_background=True, reduction=MetricReduction.MEAN, get_not_nans=False)
-confuse_metric = ConfusionMatrixMetric(include_background=True, metric_name=["f1 score", "accuracy", "sensitivity", "specificity",], compute_sample=False, reduction=MetricReduction.MEAN, get_not_nans=False)
-auc_metric     = ROCAUCMetric() # Average Macro
+def f1_metric(y_true, y_pred):
+    return f1_score(y_true, y_pred)
+
+def specificity(y_true, y_pred):
+    true_negative = np.sum((y_true == 0) & (y_pred == 0))
+    false_positive = np.sum((y_true == 0) & (y_pred == 1))
+    return true_negative / (true_negative + false_positive)
