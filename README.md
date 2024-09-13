@@ -1,6 +1,6 @@
 # SMART-Net - Official Pytorch Implementation
 
-We proposed a supervised multi-task aiding representation transfer learning network called <b>SMART-Net</b>.
+We proposed a supervised multi-task aiding representation transfer learning network called <b>SMART-Net</b>. This repository provides the official implementation of training SMART-Net as well as the usage of the pre-trained SMART-Net.
 
 
 ## 💡 Highlights
@@ -17,11 +17,8 @@ and practicality of our method.
 
 
 <p align="center"><img width="100%" src="figures/graphical_abstract.png" /></p>
-<!-- <p align="center"><img width="85%" src="figures/framework.png" /></p> -->
 
 ## Paper
-This repository provides the official implementation of training SMART-Net as well as the usage of the pre-trained SMART-Net in the following paper:
-
 <b>Title:</b> Improved performance and robustness of multi-task representation learning with consistency loss between pretexts for intracranial hemorrhage identification in head CT<br/>
 <b>Authors:</b> [Sunggu Kyung](https://github.com/babbu3682)<sup>1</sup>, Keewon Shin, Hyunsu Jeong, Ki Duk Kim, Jooyoung Park, Kyungjin Cho, Jeong Hyun Lee, Gil-Sun Hong, and Namkug Kim <br/>
 <b>LAB:</b> [MI2RL LAB](https://www.mi2rl.co/) <br/>
@@ -85,7 +82,7 @@ datasets/samples/
 
 
 ## Excuse
-For personal information security reasons of medical data in Korea, our data cannot be disclosed.
+For personal information security reasons of medical data in Korea, our datasets cannot be disclosed.
 
 
 ## 📝 Citation
