@@ -2,7 +2,8 @@
 
 # 2D
 : <<'END'
-CUDA_VISIBLE_DEVICES=0,1 python -W ignore train.py \
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
 --dataset=coreline_dataset \
 --train-batch-size=2 \
 --valid-batch-size=2 \
@@ -20,8 +21,7 @@ CUDA_VISIBLE_DEVICES=0,1 python -W ignore train.py \
 --epochs=1000 \
 --lr=1e-4 \
 --multi-gpu-mode=DataParallel \
---save-dir=/workspace/1.Hemorrhage/SMART-Net-Last/checkpoints/20240910-SMART-Net-2D-efficient \
---memo=None
+--output-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240910-SMART-Net-2D-efficient
 END
 
 
@@ -152,14 +152,3 @@ CUDA_VISIBLE_DEVICES=0,1 python -W ignore train.py \
 --save-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/predictions/240111_MaxViT_LSTM_LSTM_OnlyBCE_RandomAug' \
 --memo 'image 320x320 train and 512x512, 240111_MaxViT_LSTM_LSTM_OnlyBCE_RandomAug, Random Aug like V1'
 END
-
-
-    # 2D: encoder with MTL
-    if args.model_name == 'SMART-Net-2D-w/ResNet-50':
-        model = SMART_Net_2D(backbone=args.backbone, use_skip=args.use_skip, pool_type=args.pool_type)
-
-    elif args.model_name == 'SMART-Net-2D-w/EfficientNet-B7':
-        model = SMART_Net_2D(backbone='efficientnet-b7', use_skip=True, pool_type='gem')
-
-    elif args.model_name == 'SMART-Net-2D-w/MaxViT-XLarge':
-        model = SMART_Net_2D(backbone='maxvit-xlarge', use_skip=True, pool_type='gem')

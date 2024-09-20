@@ -5,10 +5,12 @@ Mostly copy-paste from torchvision references.
 from collections import defaultdict, OrderedDict
 import os
 import torch
-
+import transformers
 
 # Please make a code for AverageMeter. All indicators and losses are stored in dictionary form. Track a series of values and provide access to smoothed values over a window or the global series average.
 from collections import defaultdict
+import logging
+
 
 class AverageMeter:
     def __init__(self, **kwargs):
@@ -23,7 +25,6 @@ class AverageMeter:
     
     def average(self):
         return {k: v['sum'] / v['count'] for k, v in self.data.items()}
-
 
 # Check the resume point
 def load_checkpoint(model, optimizer, scheduler, filename='checkpoint.pth'):
@@ -69,24 +70,25 @@ def check_checkpoint_if_wrapper(model_state_dict):
 
 
 
-def print_args(args):
+def print_args(model_args, data_args, training_args):
     print('***********************************************')
-    print('Dataset Name:   ', args.dataset)
+    print('Dataset Name:                   ', data_args.dataset)
     print('---------- Model --------------')
-    print('Model Name:     ', args.model)
-    print('Resume From:    ', args.resume)
-    print('Save To:        ', args.save_dir)
-    print('Available CPUs: ', os.cpu_count())
-    print('---------- Loss ---------------')
-    print('Loss Name:      ', args.loss)
+    print('Model Name:                     ', model_args.model)
+    print('Resume From:                    ', model_args.resume)
+    print('Save To:                        ', training_args.output_dir)
+    print('Available CPUs:                 ', os.cpu_count())
     print('---------- Optimizer ----------')
-    print('Optimizer Name: ', args.optimizer)
-    print('Learning Rate:  ', args.lr)
-    print('Scheduler Name: ', args.scheduler)
-    print('Train Batchsize:      ', args.train_batch_size)
-    print('Valid Batchsize:      ', args.valid_batch_size)
-    print('Total Epoch:    ', args.epochs)
-    
+    print('Optimizer Name:                 ', training_args.optim)
+    print('Learning Rate:                  ', training_args.learning_rate)
+    print('Scheduler Name:                 ', training_args.lr_scheduler_type)
+    print('Train Batchsize per device:     ', training_args.per_device_train_batch_size)
+    print('Valid Batchsize per device:     ', training_args.per_device_eval_batch_size)
+    print('Total Epoch:                    ', training_args.num_train_epochs)
+    print('Torch version:                  ', torch.__version__)
+    print('Torch cudnn version:            ', torch.backends.cudnn.version())    
+
+
 
 def print_args_test(args):
     print('***********************************************')

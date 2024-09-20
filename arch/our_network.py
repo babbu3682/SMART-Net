@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import timm
-from timm.layers.conv2d_same import Conv2dSame
-from timm.layers.norm import LayerNorm2d
+from timm.models.layers.conv2d_same import Conv2dSame
+from timm.models.layers.norm import LayerNorm2d
 
 from typing import Any, Iterator, Mapping
 from itertools import chain
@@ -21,7 +21,7 @@ from einops.layers.torch import Rearrange
 # from arch.deeplab import ASPP, SeparableConv3d
 # from module.Non_Local_block import NONLocalBlock3D
 # from sliding_window import sliding_window_inference_cls_output, sliding_window_inference_seg_output
-
+from losses import MTL_Loss, CLS_Loss, SEG_Loss
 
 def initialize_head(module):
     for m in module.modules():
@@ -272,6 +272,7 @@ class SMART_Net_2D(nn.Module):
         self.use_skip  = use_skip
         self.pool_type = pool_type
         self.use_consist = use_consist
+        self.loss = MTL_Loss()
         
         if backbone == 'resnet-50':
             self.encoder = monai.networks.nets.ResNetFeatures(model_name='resnet50', pretrained=False, spatial_dims=2, in_channels=1)
@@ -350,9 +351,10 @@ class SMART_Net_2D(nn.Module):
         initialize_head(self.seg_head)
         initialize_head(self.rec_head)
  
-    def forward(self, x):
+    def forward(self, paths, images, labels, masks, **kwargs):
+
         # encoder
-        skip4, skip3, skip2, skip1, x = self.encoder(x)
+        skip4, skip3, skip2, skip1, x = self.encoder(images)
 
         # cls decoder
         cls = self.cls_decoder_block1(x)
@@ -376,14 +378,22 @@ class SMART_Net_2D(nn.Module):
         rec = self.rec_decoder_block5(rec)
 
         # head
-        seg = self.seg_head(seg)
         cls = self.cls_head(cls)
+        seg = self.seg_head(seg)
         rec = self.rec_head(rec)
         
         if self.use_consist:
-            return cls, seg, rec
+            loss, loss_dict = self.loss(pred_cls=cls, pred_seg=seg, pred_rec=rec, label=labels, mask=masks, image=images)
         else:
-            return cls, seg, rec, self.pool_for_consist(seg)
+            loss, loss_dict = self.loss(pred_cls=cls, pred_seg=seg, pred_rec=rec, label=labels, mask=masks, image=images, pooled_seg=self.pool_for_consist(seg))
+        ret = {
+            "loss": loss,
+            "loss_dict": loss_dict,
+            "cls_logits": cls.sigmoid(),
+            "seg_logits": seg.sigmoid(),
+            "rec_logits": rec
+            }
+        return ret
     
 
 
@@ -397,6 +407,7 @@ class SMART_Net_3D_CLS(nn.Module):
         self.slice_inferer = SliceInferer(roi_size=(roi_size, roi_size), sw_batch_size=sw_batch_size, spatial_dim=spatial_dim, device=torch.device("cuda"))
         self.operator_3d = operator_3d
         self.freeze_encoder = freeze_encoder
+        self.loss = CLS_Loss()
 
         # 2D Encoder
         self.model_2d = SMART_Net_2D(backbone=backbone, use_skip=use_skip, pool_type=pool_type)
@@ -447,16 +458,16 @@ class SMART_Net_3D_CLS(nn.Module):
             last_feat = F.adaptive_avg_pool2d(last_feat, output_size=1)
         return last_feat
 
-    def forward(self, x, x_lens):
+    def forward(self, paths, images, labels, depths, **kwargs):
         # CNN feature extraction
-        sequenced_feat = self.slice_inferer(x, self.feat_cls_extract)
+        sequenced_feat = self.slice_inferer(images, self.feat_cls_extract)
         sequenced_feat = sequenced_feat.flatten(start_dim=2) # output: [B, C, Depth]
         sequenced_feat = sequenced_feat.permute(0, 2, 1)     # output: [B, Depth, C]
 
         # Squential representation
         if self.operator_3d == 'lstm':
             self.LSTM.flatten_parameters()  # For Multi GPU  
-            x_packed = pack_padded_sequence(sequenced_feat, x_lens.cpu(), batch_first=True, enforce_sorted=False)  # x_len이 cpu int64로 들어가야함!!!
+            x_packed = pack_padded_sequence(sequenced_feat, depths.cpu(), batch_first=True, enforce_sorted=False)  # x_len이 cpu int64로 들어가야함!!!
             RNN_out, (h_n, h_c) = self.LSTM(x_packed, None)    # input shape must be [batch, seq, feat_dim]
             fc_output = torch.cat([h_n[-2, :, :], h_n[-1, :, :]], dim=1) # Due to the Bi-directional
             fc_output = self.linear_lstm(fc_output)
@@ -465,15 +476,19 @@ class SMART_Net_3D_CLS(nn.Module):
             cls_tokens     = self.cls_token.expand(sequenced_feat.shape[0], -1, -1)
             sequenced_feat = torch.cat((cls_tokens, sequenced_feat), dim=1)  # cls token 추가
             attention_mask = torch.ones(sequenced_feat.shape[:2], dtype=torch.long).to(sequenced_feat.device) # x_lens을 이용하여 attention_mask 생성
-            for i, x_len in enumerate(x_lens):
+            for i, x_len in enumerate(depths):
                 attention_mask[i, x_len:] = 0 # 여기 디버깅 필요.
             fc_output = self.BERT(inputs_embeds=sequenced_feat, attention_mask=attention_mask).pooler_output # inputs_embeds shape must be (batch_size, sequence_length, hidden_size)
 
         # HEAD
         fc_output = self.head(fc_output)
-    
-        return fc_output     
-       
+
+        loss = self.loss(pred_cls=fc_output, label=labels)
+        ret = {
+            "loss": loss,
+            "logits": fc_output.sigmoid()
+            }
+        return ret       
     
 
 # 3D-SEG: 3D operator w/ 2D encoder
@@ -485,6 +500,7 @@ class SMART_Net_3D_SEG(nn.Module):
         self.operator_3d = operator_3d
         self.freeze_encoder = freeze_encoder
         self.freeze_decoder = freeze_decoder
+        self.loss = SEG_Loss()
 
         # 2D Encoder
         self.model_2d = SMART_Net_2D(backbone=backbone, use_skip=use_skip, pool_type=pool_type)
@@ -580,12 +596,12 @@ class SMART_Net_3D_SEG(nn.Module):
             seg = self.seg_decoder4(seg, skip4)        
             seg = self.seg_decoder5(seg)
         
-        return seg
+        return seg    
 
 
-    def forward(self, x):
+    def forward(self, paths, images, masks, depths, **kwargs):
         # cnn feature extraction
-        stacked_feat = self.slice_inferer(x, self.feat_seg_extract) # output shape = [B, C(=16), D, H, W]
+        stacked_feat = self.slice_inferer(images, self.feat_seg_extract) # output shape = [B, C(=16), D, H, W]
         
         # Squential representation
         if self.operator_3d == '3d_cnn':
@@ -606,7 +622,13 @@ class SMART_Net_3D_SEG(nn.Module):
 
         # Head
         output = self.head(output)
-        return output
+
+        loss = self.loss(pred_seg=output, mask=masks)
+        ret = {
+            "loss": loss,
+            "logits": output.sigmoid()
+            }
+        return ret
 
 
 

@@ -49,7 +49,7 @@ def binary_tversky_loss(y_pred, y_true, alpha=0.5, beta=0.5, smooth=0.0, eps=1e-
 class MTL_Loss(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.loss_cls     = F.binary_cross_entropy
+        self.loss_cls     = F.binary_cross_entropy_with_logits
         self.loss_seg     = binary_dice_loss
         self.loss_rec     = F.l1_loss
         self.loss_consist = F.mse_loss
@@ -60,7 +60,7 @@ class MTL_Loss(torch.nn.Module):
         assert pred_rec.size() == image.size(), f"{pred_rec.size()} != {image.size()}"
 
         cls_loss  = self.loss_cls(input=pred_cls, target=label)
-        seg_loss  = self.loss_seg(y_pred=pred_seg, y_true=mask)
+        seg_loss  = self.loss_seg(y_pred=pred_seg.sigmoid(), y_true=mask)
         rec_loss  = self.loss_rec(input=pred_rec, target=image)
 
         total_loss = cls_loss + seg_loss + rec_loss
