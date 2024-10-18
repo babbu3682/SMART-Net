@@ -1,5 +1,7 @@
 # SMART-Net - Official Pytorch Implementation
 
+This is not complete....!
+
 We proposed a supervised multi-task aiding representation transfer learning network called <b>SMART-Net</b>. This repository provides the official implementation of training SMART-Net as well as the usage of the pre-trained SMART-Net.
 
 
