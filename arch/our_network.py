@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import timm
 from timm.layers.conv2d_same import Conv2dSame
 from timm.layers.norm import LayerNorm2d
+# from timm.models.layers.conv2d_same import Conv2dSame
+# from timm.models.layers.norm import LayerNorm2d
 
 from typing import Any, Iterator, Mapping
 from itertools import chain
@@ -265,12 +267,12 @@ class ViT_Decoder(ViT):
 
 # 2D: encoder with MTL
 class SMART_Net_2D(nn.Module):
-    def __init__(self, backbone='resnet50', use_skip=True, pool_type='gem', use_consist=False):
+    def __init__(self, backbone='resnet50', use_skip=True, pool_type='gem', use_consist=True, roi_size=256):
         super(SMART_Net_2D, self).__init__()
         
-        self.backbone  = backbone
-        self.use_skip  = use_skip
-        self.pool_type = pool_type
+        self.backbone    = backbone
+        self.use_skip    = use_skip
+        self.pool_type   = pool_type
         self.use_consist = use_consist
         
         if backbone == 'resnet-50':
@@ -280,9 +282,13 @@ class SMART_Net_2D(nn.Module):
             self.encoder = monai.networks.nets.EfficientNetBNFeatures(model_name="efficientnet-b7", pretrained=True, spatial_dims=2, in_channels=1)
             self.output_channels = [640, 224, 80, 48, 32]
         elif backbone == 'maxvit-xlarge':
-            self.encoder = timm.create_model('maxvit_xlarge_tf_512.in21k_ft_in1k', pretrained=True, features_only=True)
+            self.encoder = timm.create_model('maxvit_xlarge_tf_512.in21k_ft_in1k', pretrained=True, features_only=True, img_size=roi_size)
             self.encoder.stem.conv1 = Conv2dSame(1, 192, kernel_size=(3, 3), stride=(2, 2))
             self.output_channels = [1536, 768, 384, 192, 192]
+        elif backbone == 'maxvit-small':
+            self.encoder = timm.create_model('maxvit_small_tf_512.in1k', pretrained=True, features_only=True, img_size=roi_size)
+            self.encoder.stem.conv1 = Conv2dSame(1, 64, kernel_size=(3, 3), stride=(2, 2))
+            self.output_channels = [768, 384, 192, 96, 64]            
 
         # CLS Decoder
         if backbone == 'resnet50' or backbone == 'efficientnet-b7':
@@ -376,14 +382,14 @@ class SMART_Net_2D(nn.Module):
         rec = self.rec_decoder_block5(rec)
 
         # head
-        seg = self.seg_head(seg)
         cls = self.cls_head(cls)
+        seg = self.seg_head(seg)
         rec = self.rec_head(rec)
         
         if self.use_consist:
-            return cls, seg, rec
-        else:
             return cls, seg, rec, self.pool_for_consist(seg)
+        else:
+            return cls, seg, rec
     
 
 
@@ -409,7 +415,7 @@ class SMART_Net_3D_CLS(nn.Module):
             self.LSTM        = nn.LSTM(input_size=self.feat_dim, hidden_size=self.feat_dim, num_layers=3, batch_first=True, bidirectional=True)
             self.linear_lstm = nn.Linear(self.feat_dim*2, self.feat_dim, True)
             self.relu_lstm   = nn.ReLU()
-        else:
+        elif operator_3d == 'bert':
             # FC -> Tanh -> Drop -> FC
             self.config = BertConfig.from_pretrained("bert-base-uncased")
             self.config.hidden_size=self.feat_dim             # hidden_size를 self.feat_dim으로 설정
@@ -441,15 +447,15 @@ class SMART_Net_3D_CLS(nn.Module):
             self.encoder.eval()
             with torch.no_grad():
                 last_feat = self.encoder.forward(x)[-1]
-                last_feat = F.adaptive_avg_pool2d(last_feat, output_size=1)      
+                last_feat = F.adaptive_avg_pool2d(last_feat, output_size=1)
         else:
             last_feat = self.encoder.forward(x)[-1]
             last_feat = F.adaptive_avg_pool2d(last_feat, output_size=1)
-        return last_feat
+        return last_feat # (B, C, 1, 1)
 
     def forward(self, x, x_lens):
         # CNN feature extraction
-        sequenced_feat = self.slice_inferer(x, self.feat_cls_extract)
+        sequenced_feat = self.slice_inferer(x, self.feat_cls_extract) # output: [B, C, Depth, 1, 1]
         sequenced_feat = sequenced_feat.flatten(start_dim=2) # output: [B, C, Depth]
         sequenced_feat = sequenced_feat.permute(0, 2, 1)     # output: [B, Depth, C]
 
@@ -473,7 +479,46 @@ class SMART_Net_3D_CLS(nn.Module):
         fc_output = self.head(fc_output)
     
         return fc_output     
-       
+
+
+    # def forward(self, x, x_lens):
+    #     B, C, D, H, W = x.shape
+    #     slice_feat_list = []
+    #     for i in range(D):
+    #         slice_feat = self.encoder(x[:, :, i, :, :])[-1]
+    #         slice_feat = F.adaptive_avg_pool2d(slice_feat, output_size=1)
+    #         # slice_feat = self.feat_cls_extract(x[:, :, i, :, :])
+    #         slice_feat_list.append(slice_feat)
+        
+    #     stacked_slice_feat = torch.stack(slice_feat_list, dim=2) # output: [B, C, Depth, 1, 1]
+    #     sequenced_feat = stacked_slice_feat.flatten(start_dim=2)    # output: [B, C, Depth]
+    #     sequenced_feat = sequenced_feat.permute(0, 2, 1)            # output: [B, Depth, C]
+
+    #     # CNN feature extraction
+    #     # sequenced_feat = self.slice_inferer(x, self.feat_cls_extract) # output: [B, C, Depth, 1, 1]
+    #     # sequenced_feat = sequenced_feat.flatten(start_dim=2) # output: [B, C, Depth]
+    #     # sequenced_feat = sequenced_feat.permute(0, 2, 1)     # output: [B, Depth, C]
+
+    #     # Squential representation
+    #     if self.operator_3d == 'lstm':
+    #         self.LSTM.flatten_parameters()  # For Multi GPU  
+    #         x_packed = pack_padded_sequence(sequenced_feat, x_lens.cpu(), batch_first=True, enforce_sorted=False)  # x_len이 cpu int64로 들어가야함!!!
+    #         RNN_out, (h_n, h_c) = self.LSTM(x_packed, None)    # input shape must be [batch, seq, feat_dim]
+    #         fc_output = torch.cat([h_n[-2, :, :], h_n[-1, :, :]], dim=1) # Due to the Bi-directional
+    #         fc_output = self.linear_lstm(fc_output)
+    #         fc_output = self.relu_lstm(fc_output)
+    #     elif self.operator_3d == 'bert':
+    #         cls_tokens     = self.cls_token.expand(sequenced_feat.shape[0], -1, -1)
+    #         sequenced_feat = torch.cat((cls_tokens, sequenced_feat), dim=1)  # cls token 추가
+    #         attention_mask = torch.ones(sequenced_feat.shape[:2], dtype=torch.long).to(sequenced_feat.device) # x_lens을 이용하여 attention_mask 생성
+    #         for i, x_len in enumerate(x_lens):
+    #             attention_mask[i, x_len:] = 0 # 여기 디버깅 필요.
+    #         fc_output = self.BERT(inputs_embeds=sequenced_feat, attention_mask=attention_mask).pooler_output # inputs_embeds shape must be (batch_size, sequence_length, hidden_size)
+
+    #     # HEAD
+    #     fc_output = self.head(fc_output)
+    
+    #     return fc_output    
     
 
 # 3D-SEG: 3D operator w/ 2D encoder

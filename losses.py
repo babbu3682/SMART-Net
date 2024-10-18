@@ -64,7 +64,7 @@ class MTL_Loss(torch.nn.Module):
         rec_loss  = self.loss_rec(input=pred_rec, target=image)
 
         total_loss = cls_loss + seg_loss + rec_loss
-        loss_dict  = {"cls_loss": cls_loss.item(), "seg_loss": seg_loss.item(), "rec_loss": rec_loss.item()}
+        loss_dict  = {"total_loss": total_loss.item(), "cls_loss": cls_loss.item(), "seg_loss": seg_loss.item(), "rec_loss": rec_loss.item()}
 
         if pooled_seg is not None:
             total_loss += self.loss_consist(pred_cls, pooled_seg)
@@ -73,71 +73,26 @@ class MTL_Loss(torch.nn.Module):
         else:
             return total_loss, loss_dict
 
-# class MTL_CLS_SEG_REC_Loss(torch.nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.loss_cls   = functools.partial(binary_focal_loss, gamma=0.0, alpha=0.7)
-        
-#         self.loss_seg_1 = functools.partial(binary_focal_loss, gamma=4.0, alpha=0.7)
-#         self.loss_seg_2 = functools.partial(binary_tversky_loss, alpha=0.3, beta=0.7, eps=1e-7)
-        
-#         self.loss_rec_l1 = F.l1_loss
-
-#     def forward(self, pred_cls, pred_seg, pred_rec, label, mask, image):
-#         assert pred_cls.size() == label.size(), f"{pred_cls.size()} != {label.size()}"
-#         assert pred_seg.size() == mask.size(),  f"{pred_seg.size()} != {mask.size()}"
-#         assert pred_rec.size() == image.size(), f"{pred_rec.size()} != {image.size()}"
-
-#         cls_loss   = self.loss_cls(y_pred=pred_cls, y_true=label)
-#         seg_loss1  = self.loss_seg_1(y_pred=pred_seg, y_true=mask)
-#         seg_loss2  = self.loss_seg_2(y_pred=pred_seg, y_true=mask)
-
-#         rec_loss   = self.loss_rec_l1(pred_rec, image)
-        
-#         return cls_loss + seg_loss1 + seg_loss2 + rec_loss, {"cls_loss": cls_loss, "seg_loss1": seg_loss1, "seg_loss2": seg_loss2, "rec_loss": rec_loss}
-                                                                
-# class MTL_CLS_SEG_REC_Loss_2(torch.nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.loss_cls_bce  = F.binary_cross_entropy
-        
-#         self.loss_seg_dice = binary_dice_loss
-#         self.loss_seg_bce  = F.binary_cross_entropy
-        
-#         self.loss_rec_l1   = F.l1_loss
-
-#     def forward(self, pred_cls, pred_seg, pred_rec, label, mask, image):
-#         assert pred_cls.size() == label.size(), f"{pred_cls.size()} != {label.size()}"
-#         assert pred_seg.size() == mask.size(),  f"{pred_seg.size()} != {mask.size()}"
-#         assert pred_rec.size() == image.size(), f"{pred_rec.size()} != {image.size()}"
-        
-#         cls_bce_loss  = self.loss_cls_bce(input=pred_cls, target=label)
-
-#         seg_dice_loss = self.loss_seg_dice(y_pred=pred_seg, y_true=mask)
-#         seg_bce_loss  = self.loss_seg_bce(input=pred_seg, target=mask)
-
-#         rec_l1_loss   = self.loss_rec_l1(pred_rec, image)
-        
-#         return cls_bce_loss + seg_dice_loss + seg_bce_loss + rec_l1_loss, {"cls_bce_loss": cls_bce_loss, "seg1_dice_loss": seg_dice_loss, "seg2_bce_loss": seg_bce_loss, "rec_l1_loss": rec_l1_loss}
-
 
 # 3D - 2D transfer
 class CLS_Loss(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.loss_cls_bce          = F.binary_cross_entropy
+        self.loss_cls = F.binary_cross_entropy
         # self.loss_cls_binary_focal = functools.partial(binary_focal_loss, gamma=0.0, alpha=0.7)
 
     def forward(self, pred_cls, label):
         # print(logit_cls.shape, logit_seg.shape, logit_det.shape, logit_rec.shape, logit_idx.shape, label.shape, mask.shape, bbox.shape, image.shape, idx.shape)
         assert pred_cls.size() == label.size(), f"{pred_cls.size()} != {label.size()}"
         
-        cls_bce_loss           = self.loss_cls_bce(input=pred_cls, target=label)
+        cls_loss = self.loss_cls(input=pred_cls, target=label)
         # cls_binary_focal_loss  = self.loss_cls_binary_focal(y_pred=pred_cls, y_true=label)
 
         # return cls_bce_loss + cls_binary_focal_loss, {'cls_bce_loss': cls_bce_loss, 'cls_binary_focal_loss': cls_binary_focal_loss}
-        return cls_bce_loss, {'cls_bce_loss': cls_bce_loss}
-
+        total_loss = cls_loss
+        loss_dict  = {"total_loss": total_loss.item(), "cls_bce_loss": cls_loss.item()}
+        return total_loss, loss_dict
+    
 class SEG_Loss(torch.nn.Module):
     def __init__(self):
         super().__init__()

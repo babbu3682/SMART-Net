@@ -2,12 +2,37 @@
 
 # 2D
 : <<'END'
-CUDA_VISIBLE_DEVICES=0,1 python -W ignore train.py \
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
 --dataset=coreline_dataset \
---train-batch-size=2 \
---valid-batch-size=2 \
---train-num-workers=10 \
---valid-num-workers=10 \
+--train-batch-size=60 \
+--valid-batch-size=60 \
+--train-num-workers=5 \
+--valid-num-workers=5 \
+--model=SMART-Net-2D \
+--backbone=resnet-50 \
+--roi_size=256 \
+--use_skip=True \
+--pool_type=gem \
+--use_consist=True \
+--loss=MTL_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240921-SMART-Net-2D-resnet \
+--memo=None
+END
+
+: <<'END'
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/zero2_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset \
+--train-batch-size=20 \
+--valid-batch-size=10 \
+--train-num-workers=2 \
+--valid-num-workers=2 \
 --model=SMART-Net-2D \
 --backbone=efficientnet-b7 \
 --roi_size=256 \
@@ -17,149 +42,292 @@ CUDA_VISIBLE_DEVICES=0,1 python -W ignore train.py \
 --loss=MTL_Loss \
 --optimizer=adamw \
 --scheduler=poly_lr \
---epochs=1000 \
+--epochs=500 \
 --lr=1e-4 \
---multi-gpu-mode=DataParallel \
---save-dir=/workspace/1.Hemorrhage/SMART-Net-Last/checkpoints/20240910-SMART-Net-2D-efficient \
+--multi-gpu=DDP \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240920-SMART-Net-2D-efficient \
+--memo=None
+END
+
+
+: <<'END'
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset \
+--train-batch-size=28 \
+--valid-batch-size=28 \
+--train-num-workers=0 \
+--valid-num-workers=0 \
+--model=SMART-Net-2D \
+--backbone=maxvit-small \
+--roi_size=256 \
+--use_skip=True \
+--pool_type=gem \
+--use_consist=True \
+--loss=MTL_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240922-SMART-Net-2D-maxvit-small \
+--memo=None
+END
+
+
+: <<'END'
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset \
+--train-batch-size=2 \
+--valid-batch-size=20 \
+--train-num-workers=0 \
+--valid-num-workers=0 \
+--model=SMART-Net-2D \
+--backbone=maxvit-xlarge \
+--roi_size=256 \
+--use_skip=True \
+--pool_type=gem \
+--use_consist=True \
+--loss=MTL_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240921-SMART-Net-2D-maxvit \
 --memo=None
 END
 
 
 
 
-# 3D - 2D transfer
+
+
+
+
+# 3D - 2D transfer CLS
 : <<'END'
-CUDA_VISIBLE_DEVICES=0,1 python -W ignore train.py \
---dataset 'coreline_dataset' \
---train-batch-size 2 \
---valid-batch-size 2 \
---train-num-workers 10 \
---valid-num-workers 10 \
---model 'SMART-Net-3D-CLS' \
---backbone 'efficientnet-b7' \
---roi_size 256 \
---use_skip True \
---pool_type 'gem' \
---operator_3d 'LSTM' \
---use_consist True \
---loss 'CLS_Loss' \
---optimizer 'adamw' \
---scheduler 'poly_lr' \
---epochs 1000 \
---lr 1e-4 \
---multi-gpu-mode 'DataParallel' \
---encoder-pretrained '/workspace/1.Hemorrhage/SMART-Net-Last/checkpoints/20240910-SMART-Net-2D-efficient/weights/epoch_3_checkpoint.pth' \
---save-dir '/workspace/1.Hemorrhage/SMART-Net-Last/checkpoints/20240910-SMART-Net-3D-efficient' \
---memo 'None'
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset-3d_cls-2d_transfer \
+--train-batch-size=72 \
+--valid-batch-size=72 \
+--train-num-workers=2 \
+--valid-num-workers=2 \
+--model=SMART-Net-3D-CLS \
+--backbone=maxvit-small \
+--roi_size=256 \
+--use_skip=True \
+--operator_3d=bert \
+--loss=CLS_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--transfer-pretrained=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240922-SMART-Net-2D-maxvit-small/weights/epoch_327_checkpoint.pth \
+--use-pretrained-encoder=True \
+--freeze-encoder=True \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240924-SMART-Net-3D-maxvit-small-TR-freeze-encoder \
+--memo=None
 END
 
 : <<'END'
-CUDA_VISIBLE_DEVICES=6,7 python -W ignore train.py \
---dataset 'coreline_dataset_3d_2dtransfer_crop' \
---train-batch-size 96 \
---valid-batch-size=96 \
---train-num_workers 48 \
---valid-num_workers 48 \
---model 'EfficientNetB7_LSTM' \
---loss 'CLS_Loss' \
---optimizer 'adamw' \
---scheduler 'poly_lr' \
---epochs 500 \
---lr 1e-4 \
---multi-gpu-mode 'DataParallel' \
---checkpoint-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/checkpoints/240106_EfficientNetB7_LSTM_only_BCE' \
---save-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/predictions/240106_EfficientNetB7_LSTM_only_BCE' \
---memo 'image 320x320 train and 512x512, 240106_EfficientNetB7_LSTM_only_BCE, Random Aug like V1'
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --main_process_port 3683 \
+--config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset-3d_cls-2d_transfer \
+--train-batch-size=72 \
+--valid-batch-size=72 \
+--train-num-workers=2 \
+--valid-num-workers=2 \
+--model=SMART-Net-3D-CLS \
+--backbone=maxvit-small \
+--roi_size=256 \
+--use_skip=True \
+--operator_3d=lstm \
+--loss=CLS_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--transfer-pretrained=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240922-SMART-Net-2D-maxvit-small/weights/epoch_327_checkpoint.pth \
+--use-pretrained-encoder=True \
+--freeze-encoder=True \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240924-SMART-Net-3D-maxvit-small-LSTM-freeze-encoder \
+--memo=None
 END
 
+# work
+# resnet
+: <<'END'
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset-3d_cls-2d_transfer \
+--train-batch-size=72 \
+--valid-batch-size=72 \
+--train-num-workers=2 \
+--valid-num-workers=2 \
+--model=SMART-Net-3D-CLS \
+--backbone=resnet-50 \
+--roi_size=256 \
+--use_skip=True \
+--operator_3d=bert \
+--loss=CLS_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--transfer-pretrained=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240921-SMART-Net-2D-resnet/weights/epoch_415_checkpoint.pth \
+--use-pretrained-encoder=True \
+--freeze-encoder=True \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240924-SMART-Net-3D-resnet-TR-freeze-encoder \
+--memo=None
+END
 
 : <<'END'
-CUDA_VISIBLE_DEVICES=6,7 python -W ignore train.py \
---dataset 'coreline_dataset_3d_2dtransfer' \
---train-batch-size 96 \
---valid-batch-size 96 \
---train-num_workers 48 \
---valid-num_workers 48 \
---model 'EfficientNetB7_LSTM' \
---loss 'CLS_Loss' \
---optimizer 'adamw' \
---scheduler 'poly_lr' \
---epochs 500 \
---lr 1e-4 \
---multi-gpu-mode 'DataParallel' \
---checkpoint-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/checkpoints/240107_EfficientNetB7_LSTM_only_BCE' \
---save-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/predictions/240107_EfficientNetB7_LSTM_only_BCE' \
---memo 'image 320x320 train and 512x512, 240107_EfficientNetB7_LSTM_only_BCE, No Random'
+CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --main_process_port 0 \
+--config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset-3d_cls-2d_transfer \
+--train-batch-size=72 \
+--valid-batch-size=72 \
+--train-num-workers=2 \
+--valid-num-workers=2 \
+--model=SMART-Net-3D-CLS \
+--backbone=resnet-50 \
+--roi_size=256 \
+--use_skip=True \
+--operator_3d=lstm \
+--loss=CLS_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--transfer-pretrained=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240921-SMART-Net-2D-resnet/weights/epoch_415_checkpoint.pth \
+--use-pretrained-encoder=True \
+--freeze-encoder=True \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240924-SMART-Net-3D-resnet-LSTM-freeze-encoder \
+--memo=None
 END
 
-
+# efficientnet
 : <<'END'
-CUDA_VISIBLE_DEVICES=2,3 python -W ignore train.py \
---dataset 'coreline_dataset_3d_2dtransfer' \
---train-batch-size 96 \
---valid-batch-size 96 \
---train-num_workers 48 \
---valid-num_workers 48 \
---model 'MaxViT_LSTM' \
---loss 'CLS_Loss' \
---optimizer 'adamw' \
---scheduler 'poly_lr' \
---epochs 500 \
---lr 1e-4 \
---multi-gpu-mode 'DataParallel' \
---checkpoint-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/checkpoints/231229_MaxViT_LSTM' \
---save-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/predictions/231229_MaxViT_LSTM' \
---memo 'image 512x512, 231229_MaxViT_LSTM'
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset-3d_cls-2d_transfer \
+--train-batch-size=72 \
+--valid-batch-size=72 \
+--train-num-workers=0 \
+--valid-num-workers=0 \
+--model=SMART-Net-3D-CLS \
+--backbone=efficientnet-b7 \
+--roi_size=256 \
+--use_skip=True \
+--operator_3d=bert \
+--loss=CLS_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--transfer-pretrained=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240920-SMART-Net-2D-efficient/weights/epoch_293_checkpoint.pth \
+--use-pretrained-encoder=True \
+--freeze-encoder=True \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240924-SMART-Net-3D-efficientnet-TR-freeze-encoder \
+--memo=None
 END
 
-
+# work
 : <<'END'
-CUDA_VISIBLE_DEVICES=6,7 python -W ignore train.py \
---dataset 'coreline_dataset_3d_2dtransfer_crop' \
---train-batch-size 96 \
---valid-batch-size 96 \
---train-num_workers 48 \
---valid-num_workers 48 \
---model 'EfficientNetB7_LSTM' \
---loss 'CLS_Loss' \
---optimizer 'adamw' \
---scheduler 'poly_lr' \
---epochs 500 \
---lr 1e-4 \
---multi-gpu-mode 'DataParallel' \
---checkpoint-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/checkpoints/240111_EfficientNetB7_LSTM_OnlyBCE_RandomAug' \
---save-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/predictions/240111_EfficientNetB7_LSTM_OnlyBCE_RandomAug' \
---memo 'image 320x320 train and 512x512, 240111_EfficientNetB7_LSTM_OnlyBCE_RandomAug, Random Aug like V1'
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --main_process_port 3683 \
+--config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset-3d_cls-2d_transfer \
+--train-batch-size=72 \
+--valid-batch-size=72 \
+--train-num-workers=0 \
+--valid-num-workers=0 \
+--model=SMART-Net-3D-CLS \
+--backbone=efficientnet-b7 \
+--roi_size=256 \
+--use_skip=True \
+--operator_3d=lstm \
+--loss=CLS_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--transfer-pretrained=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240920-SMART-Net-2D-efficient/weights/epoch_293_checkpoint.pth \
+--use-pretrained-encoder=True \
+--freeze-encoder=True \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240924-SMART-Net-3D-efficientnet-LSTM-freeze-encoder \
+--memo=None
 END
 
-
-
+# work
+# maxvit-xlarge
 : <<'END'
-CUDA_VISIBLE_DEVICES=0,1 python -W ignore train.py \
---dataset 'coreline_dataset_3d_2dtransfer_crop' \
---train-batch-size 96 \
---valid-batch-size 96 \
---train-num_workers 48 \
---valid-num_workers 48 \
---model 'MaxViT_LSTM' \
---loss 'CLS_Loss' \
---optimizer 'adamw' \
---scheduler 'poly_lr' \
---epochs 500 \
---lr 1e-4 \
---multi-gpu-mode 'DataParallel' \
---checkpoint-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/checkpoints/240111_MaxViT_LSTM_LSTM_OnlyBCE_RandomAug' \
---save-dir '/workspace/sunggu/1.Hemorrhage/SMART-Net-Last/predictions/240111_MaxViT_LSTM_LSTM_OnlyBCE_RandomAug' \
---memo 'image 320x320 train and 512x512, 240111_MaxViT_LSTM_LSTM_OnlyBCE_RandomAug, Random Aug like V1'
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset-3d_cls-2d_transfer \
+--train-batch-size=36 \
+--valid-batch-size=36 \
+--train-num-workers=0 \
+--valid-num-workers=0 \
+--model=SMART-Net-3D-CLS \
+--backbone=maxvit-xlarge \
+--roi_size=256 \
+--use_skip=True \
+--operator_3d=bert \
+--loss=CLS_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--transfer-pretrained=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240921-SMART-Net-2D-maxvit-xlarge/weights/epoch_332_checkpoint.pth \
+--use-pretrained-encoder=True \
+--freeze-encoder=True \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240924-SMART-Net-3D-maxvit-xlarge-TR-freeze-encoder \
+--memo=None
 END
 
+# work
+: <<'END'
+CUDA_VISIBLE_DEVICES=4,5,6,7 accelerate launch --main_process_port 3683 \
+--config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
 
-    # 2D: encoder with MTL
-    if args.model_name == 'SMART-Net-2D-w/ResNet-50':
-        model = SMART_Net_2D(backbone=args.backbone, use_skip=args.use_skip, pool_type=args.pool_type)
-
-    elif args.model_name == 'SMART-Net-2D-w/EfficientNet-B7':
-        model = SMART_Net_2D(backbone='efficientnet-b7', use_skip=True, pool_type='gem')
-
-    elif args.model_name == 'SMART-Net-2D-w/MaxViT-XLarge':
-        model = SMART_Net_2D(backbone='maxvit-xlarge', use_skip=True, pool_type='gem')
+accelerate launch --config_file /workspace/1.Hemorrhage/SMART-Net/default_config.yaml \
+/workspace/1.Hemorrhage/SMART-Net/train.py \
+--dataset=coreline_dataset-3d_cls-2d_transfer \
+--train-batch-size=72 \
+--valid-batch-size=72 \
+--train-num-workers=0 \
+--valid-num-workers=0 \
+--model=SMART-Net-3D-CLS \
+--backbone=maxvit-xlarge \
+--roi_size=256 \
+--use_skip=True \
+--operator_3d=lstm \
+--loss=CLS_Loss \
+--optimizer=adamw \
+--scheduler=poly_lr \
+--epochs=500 \
+--lr=1e-4 \
+--multi-gpu=DDP \
+--transfer-pretrained=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240921-SMART-Net-2D-maxvit-xlarge/weights/epoch_332_checkpoint.pth \
+--use-pretrained-encoder=True \
+--freeze-encoder=True \
+--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240924-SMART-Net-3D-maxvit-xlarge-LSTM-freeze-encoder \
+--memo=None
+END

@@ -9,6 +9,13 @@ import torch
 
 # Please make a code for AverageMeter. All indicators and losses are stored in dictionary form. Track a series of values and provide access to smoothed values over a window or the global series average.
 from collections import defaultdict
+import matplotlib.pyplot as plt
+
+
+# Setting...!
+fn_denorm  = lambda x: (x * 0.5) + 0.5
+fn_tonumpy = lambda x: x.detach().cpu().numpy()
+
 
 class AverageMeter:
     def __init__(self, **kwargs):
@@ -67,6 +74,60 @@ def check_checkpoint_if_wrapper(model_state_dict):
     else:
         return model_state_dict
 
+def check_2d_data_device(multi_gpu, device, image, label, mask):
+    if multi_gpu == 'DDP':
+        image = image
+        label = label
+        mask  = mask
+    else:
+        image = image.to(device).float()
+        label = label.to(device).float()
+        mask  = mask.to(device).float()
+    return image, label, mask
+
+def check_3d_cls_data_device(multi_gpu, device, image, label):
+    if multi_gpu == 'DDP':
+        image = image
+        label = label
+    else:
+        image = image.to(device).float()
+        label = label.to(device).float()
+    return image, label
+
+def check_3d_seg_data_device(multi_gpu, device, image, mask):
+    if multi_gpu == 'DDP':
+        image = image
+        mask  = mask
+    else:
+        image = image.to(device).float()
+        mask  = mask.to(device).float()
+    return image, mask
+
+def collect_dict_all_processor(processor, average=True):
+    merged_dict = defaultdict(list)
+    for i in processor:
+        for k, v in i.items():
+            merged_dict[k].append(v)
+    # Average
+    if average:
+        for k, v in merged_dict.items():
+            merged_dict[k] = sum(v) / len(v)
+    return merged_dict
+
+def save_image_and_prediction(image, mask, pred_seg, pred_rec, save_dir, epoch, index=0):
+    # SAVE SEG
+    image_png = fn_tonumpy(fn_denorm(mask[index]))  # B, C, H, W
+    plt.imsave(f'{save_dir}/predictions/epoch_{epoch}_mask.png', image_png[0], cmap='gray')
+
+    pred_png = fn_tonumpy(fn_denorm(pred_seg[index])).round()
+    plt.imsave(f'{save_dir}/predictions/epoch_{epoch}_pred_seg.png', pred_png[0], cmap='gray')
+
+    # SAVE REC
+    image_png = fn_tonumpy(fn_denorm(image[index]))  # B, C, H, W
+    plt.imsave(f'{save_dir}/predictions/epoch_{epoch}_image.png', image_png[0], cmap='gray')
+
+    pred_png = fn_tonumpy(fn_denorm(pred_rec[index]))
+    plt.imsave(f'{save_dir}/predictions/epoch_{epoch}_pred_rec.png', pred_png[0], cmap='gray')
 
 
 def print_args(args):

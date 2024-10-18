@@ -1,0 +1,178 @@
+{
+    // IntelliSense를 사용하여 가능한 특성에 대해 알아보세요.
+    // 기존 특성에 대한 설명을 보려면 가리킵니다.
+    // 자세한 내용을 보려면 https://go.microsoft.com/fwlink/?linkid=830387을(를) 방문하세요.
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "Python Debug: Train Code #1",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/workspace/1.Hemorrhage/SMART-Net-Last/train.py",
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1",
+                "OMP_NUM_THREADS": "1",
+            },
+            "args": [
+                "--dataset=coreline_dataset",
+                "--train-batch-size=2",
+                "--valid-batch-size=2",
+                "--train-num-workers=10",
+                "--valid-num-workers=10",
+                "--model=SMART-Net-2D",
+                "--backbone=resnet-50",
+                "--roi_size=256",
+                "--use_skip=True",
+                "--pool_type=gem",
+                "--use_consist=True",
+                "--loss=MTL_Loss",
+                "--optimizer=adamw",
+                "--scheduler=poly_lr",
+                "--epochs=1000",
+                "--lr=1e-4",
+                "--multi-gpu-mode=DataParallel",
+                "--save-dir=/workspace/1.Hemorrhage/SMART-Net-Last/checkpoints/20240910-SMART-Net-2D-resnet",
+                "--memo=None"
+            ]
+        },
+
+        {
+            "name": "Python Debug: Train Code #2",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/workspace/1.Hemorrhage/SMART-Net-Last/train.py",
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1",
+                "OMP_NUM_THREADS": "1",
+            },
+            "args": [
+                "--dataset=coreline_dataset_3d_2dtransfer",
+                "--train-batch-size=2",
+                "--valid-batch-size=2",
+                "--train-num-workers=10",
+                "--valid-num-workers=10",
+                "--model=SMART-Net-3D-CLS",
+                "--backbone=efficientnet-b7",
+                "--roi_size=256",
+                "--use_skip=True",
+                "--pool_type=gem",
+                "--operator_3d=bert",
+                "--use_consist=True",
+                "--loss=CLS_Loss",
+                "--optimizer=adamw",
+                "--scheduler=poly_lr",
+                "--epochs=1000",
+                "--lr=1e-4",
+                "--multi-gpu-mode=DataParallel",
+                "--encoder-pretrained=/workspace/1.Hemorrhage/SMART-Net-Last/checkpoints/20240910-SMART-Net-2D-efficient/weights/epoch_3_checkpoint.pth",
+                "--save-dir=/workspace/1.Hemorrhage/SMART-Net-Last/checkpoints/20240910-SMART-Net-3D-efficient",
+                "--memo=None"
+            ]
+        },        
+
+
+        {
+            "name": "Python Debug: TEST Code #1",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "accelerate.commands.launch",
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+                "OMP_NUM_THREADS": "1",
+            },
+            "justMyCode": false,
+            "args": [
+                "/workspace/1.Hemorrhage/SMART-Net/train.py",
+                "--dataset=coreline_dataset",
+                "--per_device_train_batch_size=2",
+                "--per_device_eval_batch_size=2",
+                "--model=SMART-Net-2D",
+                "--backbone=efficientnet-b7",
+                "--roi_size=256",
+                "--use_skip=True",
+                "--pool_type=gem",
+                "--use_consist=True",
+                "--num_train_epochs=1000",
+                "--learning_rate=1e-4",
+                "--output_dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240910-SMART-Net-2D-efficient"
+            ]
+        },
+
+        {
+            "name": "Python Debug: Train Code # 업그레이드",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "accelerate.commands.launch",
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7",
+                "OMP_NUM_THREADS": "1",
+            },
+            "justMyCode": false,
+            "args": [
+                "--config_file=/workspace/1.Hemorrhage/SMART-Net/default_config.yaml",
+                "/workspace/1.Hemorrhage/SMART-Net/train.py",
+                "--dataset=coreline_dataset",
+                "--train-batch-size=2",
+                "--valid-batch-size=10",
+                "--train-num-workers=2",
+                "--valid-num-workers=2",
+                "--model=SMART-Net-2D",
+                "--backbone=maxvit-xlarge",
+                "--roi_size=256",
+                "--use_skip=True",
+                "--pool_type=gem",
+                "--use_consist=True",
+                "--loss=MTL_Loss",
+                "--optimizer=adamw",
+                "--scheduler=poly_lr",
+                "--epochs=500",
+                "--lr=1e-4",
+                "--multi-gpu=DDP",
+                "--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240920-SMART-Net-2D-maxvit",
+                "--memo=None"
+            ]
+        },
+
+        {
+            "name": "Python Debug: Train Code # 업그레이드2",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "accelerate.commands.launch",
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7",
+                "OMP_NUM_THREADS": "1",
+            },
+            "justMyCode": false,
+            "args": [
+                "--config_file=/workspace/1.Hemorrhage/SMART-Net/default_config.yaml",
+                "/workspace/1.Hemorrhage/SMART-Net/train.py",
+                "--dataset=coreline_dataset-3d_cls-2d_transfer",
+                "--train-batch-size=4",
+                "--valid-batch-size=4",
+                "--train-num-workers=2",
+                "--valid-num-workers=2",
+                "--model=SMART-Net-3D-CLS",
+                "--backbone=maxvit-small",
+                "--roi_size=256",
+                "--use_skip=True",
+                "--pool_type=gem",
+                "--use_consist=True",
+                "--loss=MTL_Loss",
+                "--optimizer=adamw",
+                "--scheduler=poly_lr",
+                "--epochs=500",
+                "--lr=1e-4",
+                "--multi-gpu=DDP",
+                "--save-dir=/workspace/1.Hemorrhage/SMART-Net/checkpoints/20240920-SMART-Net-2D-maxvit",
+                "--memo=None"
+            ]
+        },        
+
+    ]
+}

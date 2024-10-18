@@ -9,6 +9,8 @@ import random
 import SimpleITK as sitk
 import pydicom
 import albumentations as A
+import pandas as pd
+
 from albumentations.pytorch import ToTensorV2
 from albumentations.core.transforms_interface import ImageOnlyTransform, DualTransform
 
@@ -98,6 +100,12 @@ def get_array_pydicom(path):
     pixel_array = (pixel_array * slope) + intercept
     pixel_array = np.array(pixel_array, dtype=np.float32)
     return pixel_array
+
+def extract_3D(x):
+    dcm_list = list_sort_nicely(glob.glob(x + '/*.dcm'))
+    # data_3d  = np.concatenate([sitk.GetArrayFromImage(sitk.ReadImage(dcm)) for dcm in dcm_list], axis=0)
+    data_3d  = np.stack([get_array_pydicom(dcm) for dcm in dcm_list], axis=-1) # H, W, D
+    return data_3d
 
 class DualTransform_V2(DualTransform):
     @property
@@ -387,6 +395,29 @@ def SEG_pad_collate_fn_PAD(batch, roi_size=256, max_length=64):
 
     return paths, stack_padded_image, stack_padded_mask, depths
 
+def TEST_2D_pad_collate_fn(batch, roi_size=256, max_length=64):
+    paths  = []
+    depths = []
+    # len(batch) == batch_size
+    for sample in batch:
+        paths.append(sample[0])
+        depths.append(sample[4])
+
+    depths = torch.IntTensor(depths)
+    
+    stack_padded_image = torch.zeros( (len(batch), 1, max_length, roi_size, roi_size) )
+    stack_padded_mask  = torch.zeros( (len(batch), 1, max_length, roi_size, roi_size) )
+    stacl_padded_label = torch.zeros( (len(batch), max_length) )
+
+    for i, sample in enumerate(batch):
+        ori_c, ori_z, ori_x, ori_y = sample[1].shape
+        stack_padded_image[i, :ori_c, :ori_z, :ori_x, :ori_y] = sample[1]
+        stack_padded_mask[i, :ori_c, :ori_z, :ori_x, :ori_y]  = sample[3]
+        stacl_padded_label[i, :ori_z] = sample[2]
+
+    return paths, stack_padded_image, stacl_padded_label, stack_padded_mask, depths
+
+
 def get_transforms_2D(mode="train", roi_size=256):
     if mode == "train":
         transform_list = [
@@ -424,7 +455,8 @@ def get_transforms_2D(mode="train", roi_size=256):
             # normalization
             A.Normalize(mean=0.5, std=0.5, max_pixel_value=1.0, p=1.0),
             ToTensorV2(transpose_mask=True)
-        ])
+        ])    
+        return A.Compose(transform_list, additional_targets={'image2': 'image'})
     
     elif mode == "valid":
         transform_list = [
@@ -445,8 +477,26 @@ def get_transforms_2D(mode="train", roi_size=256):
             A.Normalize(mean=0.5, std=0.5, max_pixel_value=1.0, p=1.0),
             ToTensorV2(transpose_mask=True)
         ])
-    
-    return A.Compose(transform_list, additional_targets={'image2': 'image'})
+        return A.Compose(transform_list, additional_targets={'image2': 'image'})
+
+    elif mode == "test":
+        transform_list = [
+            WindowingTransform(always_apply=True, p=1.0),
+            ChangeToUint8(always_apply=True, p=1.0),
+            FixedClahe(always_apply=True, p=1.0),
+            ChangeToFloat32(always_apply=True, p=1.0),
+            MinmaxNormalize(always_apply=True, p=1.0),
+            ]
+        
+        if roi_size != 512:
+            transform_list.append(ResizeTransform(height=roi_size, width=roi_size, always_apply=True, p=1.0))
+
+        transform_list.extend([
+            # normalization
+            A.Normalize(mean=0.5, std=0.5, max_pixel_value=1.0, p=1.0),
+            ToTensorV2(transpose_mask=True)
+        ])
+        return A.ReplayCompose(transform_list, additional_targets={'image2':'image'})
 
 def get_transforms_3D_2Dtransfer(mode="train", roi_size=256):
     if mode == "train":
@@ -485,7 +535,7 @@ def get_transforms_3D_2Dtransfer(mode="train", roi_size=256):
             ToTensorV2(transpose_mask=True)
         ])
     
-    elif mode == "valid":
+    elif mode == "valid" or mode == "test":
         transform_list = [
             WindowingTransform(always_apply=True, p=1.0),
             ChangeToUint8(always_apply=True, p=1.0),
@@ -513,19 +563,19 @@ def get_transforms_3D_2Dtransfer(mode="train", roi_size=256):
 # 2D
 class HEMO_2D_MTL_Dataset(BaseDataset):
     def __init__(self, mode="train", roi_size=256):
-        self.root = '/workspace/1.Hemorrhage/SMART-Net-Last/datasets'
+        self.root = '/workspace/1.Hemorrhage/SMART-Net/datasets'
         self.mode = mode
         if mode == 'train':
-            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Train_nii/*_img.nii.gz'))  + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Coreline_1350/NIFTI_IMG/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Asan_internal/*_img.nii.gz'))
-            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Train_nii/*_mask.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Coreline_1350/NIFTI_SEGGT/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Asan_internal/*_mask.nii.gz'))
+            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Train_nii/*_img.nii.gz'))  + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Coreline_1350/NIFTI_IMG/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Asan_internal/*_img.nii.gz'))
+            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Train_nii/*_mask.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Coreline_1350/NIFTI_SEGGT/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Asan_internal/*_mask.nii.gz'))
         else:
-            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Valid_nii/*_img.nii.gz'))
-            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Valid_nii/*_mask.nii.gz'))
+            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_img.nii.gz'))
+            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_mask.nii.gz'))
         
         self.transforms = get_transforms_2D(mode=mode, roi_size=roi_size)
 
-        self.image_list = self.image_list[:100:10]
-        self.mask_list = self.mask_list[:100:10]
+        self.image_list = self.image_list
+        self.mask_list = self.mask_list
     def __len__(self):
         return len(self.image_list)
 
@@ -566,20 +616,20 @@ class HEMO_2D_MTL_Dataset(BaseDataset):
 # 3D - 2D transfer
 class HEMO_3D_CLS_Dataset_2Dtransfer(BaseDataset):
     def __init__(self, mode="train", roi_size=256):
-        self.root = '/workspace/1.Hemorrhage/SMART-Net-Last/SMART-Net/datasets'
+        self.root = '/workspace/1.Hemorrhage/SMART-Net/SMART-Net/datasets'
         self.roi_size = roi_size
         self.mode = mode
         if mode == 'train':
-            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Train_nii/*_img.nii.gz'))  + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Coreline_1350/NIFTI_IMG/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Asan_internal/*_img.nii.gz'))
-            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Train_nii/*_mask.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Coreline_1350/NIFTI_SEGGT/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Asan_internal/*_mask.nii.gz'))
+            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Train_nii/*_img.nii.gz'))  + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Coreline_1350/NIFTI_IMG/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Asan_internal/*_img.nii.gz'))
+            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Train_nii/*_mask.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Coreline_1350/NIFTI_SEGGT/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Asan_internal/*_mask.nii.gz'))
         else:
-            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Valid_nii/*_img.nii.gz'))
-            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Valid_nii/*_mask.nii.gz'))
+            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_img.nii.gz'))
+            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_mask.nii.gz'))
         
         self.transforms = get_transforms_3D_2Dtransfer(mode=mode, roi_size=roi_size)
         
-        self.image_list = self.image_list[:100:10]
-        self.mask_list = self.mask_list[:100:10]
+        self.image_list = self.image_list
+        self.mask_list = self.mask_list
     def __len__(self):
         return len(self.image_list)
 
@@ -623,20 +673,20 @@ class HEMO_3D_CLS_Dataset_2Dtransfer(BaseDataset):
 
 class HEMO_3D_SEG_Dataset_2Dtransfer(BaseDataset):
     def __init__(self, mode="train", roi_size=256):
-        self.root = '/workspace/1.Hemorrhage/SMART-Net-Last/SMART-Net/datasets'
+        self.root = '/workspace/1.Hemorrhage/SMART-Net/SMART-Net/datasets'
         self.roi_size = roi_size
         self.mode = mode
         if mode == 'train':
-            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Train_nii/*_img.nii.gz'))  + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Coreline_1350/NIFTI_IMG/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Asan_internal/*_img.nii.gz'))
-            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Train_nii/*_mask.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Coreline_1350/NIFTI_SEGGT/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Test_nii/Asan_internal/*_mask.nii.gz'))
+            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Train_nii/*_img.nii.gz'))  + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Coreline_1350/NIFTI_IMG/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Asan_internal/*_img.nii.gz'))
+            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Train_nii/*_mask.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Coreline_1350/NIFTI_SEGGT/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Asan_internal/*_mask.nii.gz'))
         else:
-            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Valid_nii/*_img.nii.gz'))
-            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net-Last/dataset/Valid_nii/*_mask.nii.gz'))
+            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_img.nii.gz'))
+            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_mask.nii.gz'))
         
         self.transforms = get_transforms_3D_2Dtransfer(mode=mode, roi_size=roi_size)
         
-        self.image_list = self.image_list[:100:10]
-        self.mask_list = self.mask_list[:100:10]
+        self.image_list = self.image_list
+        self.mask_list = self.mask_list
     def __len__(self):
         return len(self.image_list)
 
@@ -818,3 +868,219 @@ def get_dataloader(name, mode, batch_size, num_workers, roi_size, operator_3d):
             
     return data_loader
 
+
+
+################# TEST ##################################
+# 2D
+class TEST_HEMO_2D_MTL_Dataset(BaseDataset):
+    def __init__(self, roi_size=256):
+        self.root = '/workspace/1.Hemorrhage/SMART-Net/SMART-Net/datasets'
+        self.roi_size   = roi_size
+        self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_img.nii.gz'))
+        self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_mask.nii.gz'))
+        self.transforms = get_transforms_2D(mode='test', roi_size=roi_size)
+    
+    def __len__(self):
+        return len(self.image_list)
+
+    def __getitem__(self, index):
+        max_attempts = 100
+        for _ in range(max_attempts):
+            try:        
+                # image
+                image = sitk.ReadImage(self.image_list[index])
+                image = sitk.GetArrayFromImage(image)  # D, H, W
+
+                # mask
+                mask = sitk.ReadImage(self.mask_list[index])
+                mask = sitk.GetArrayFromImage(mask)  # D, H, W
+        
+                D, H, W = image.shape
+
+                # augmentation
+                augmented_images  = torch.empty((1, D, self.roi_size, self.roi_size), dtype=torch.float32)
+                augmented_masks   = torch.empty((1, D, self.roi_size, self.roi_size), dtype=torch.float32)
+                first_image_slice = image[0, :, :]
+                first_mask_slice  = mask[0, :, :]
+                sample = self.transforms(image=first_image_slice, mask=first_mask_slice)
+                augmented_images[:, 0, :, :] = sample['image']
+                augmented_masks[:, 0, :, :]  = sample['mask']
+                replay = sample['replay']
+                for d in range(1, D):
+                    slice_image = image[d, :, :]
+                    slice_mask  = mask[d, :, :]
+                    sample = A.ReplayCompose.replay(replay, image=slice_image, mask=slice_mask)
+                    augmented_images[:, d, :, :] = sample["image"]
+                    augmented_masks[:, d, :, :]  = sample["mask"]
+
+                # BG=0, B = 1, M = 2
+                label = augmented_masks.flatten(2).any(dim=2).float().squeeze(0)  # [D]
+
+                # image [B, 1, 512, 512], mask [B, 1, 512, 512]
+                return self.image_list[index], augmented_images.float(), label.float(), augmented_masks.float(), D
+
+            except Exception as e:
+                print(f"Error in __getitem__ at path {self.image_list[index]}: {e}")
+                index = random.randint(0, len(self.image_list) - 1)
+
+class TEST_HEMO_2D_MTL_Dataset_Demo(BaseDataset):
+    def __init__(self, roi_size=256):
+        self.root = '/workspace/1.Hemorrhage/SMART-Net/datasets'
+        self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Coreline_TEST_dcm/*/*'))
+        self.label_list = pd.read_csv('/workspace/1.Hemorrhage/SMART-Net/dataset/Coreline_1795_TEST_Label.csv')['Label'].values
+        self.transforms = get_transforms_2D(mode='test', roi_size=roi_size)
+        self.image_list = self.image_list
+        
+    def __len__(self):
+        return len(self.image_list)
+
+    def __getitem__(self, index):
+        max_attempts = 100
+        for _ in range(max_attempts):
+            try:
+                # image
+                image = extract_3D(self.image_list[index]).transpose(2, 0, 1) # D, H, W
+
+                D, H, W = image.shape
+
+                # augmentation
+                augmented_images  = torch.empty((1, D, self.roi_size, self.roi_size), dtype=torch.float32)
+                first_image_slice = image[0, :, :]
+                sample = self.transforms(image=first_image_slice)
+                augmented_images[:, 0, :, :] = sample['image']
+                replay = sample['replay']
+                for d in range(1, D):
+                    slice_image = image[d, :, :]
+                    sample = A.ReplayCompose.replay(replay, image=slice_image)
+                    augmented_images[:, d, :, :] = sample["image"]
+
+                # label                
+                label = torch.tensor([self.label_list[index]])
+
+                # image [B, 1, 512, 512], label [B, 1]
+                return self.image_list[index], augmented_images.float(), label.float()
+
+            except Exception as e:
+                print(f"Error in __getitem__ at path {self.image_list[index]}: {e}")
+                index = random.randint(0, len(self.image_list) - 1)
+
+# 3D - 2D transfer
+class TEST_HEMO_3D_CLS_Dataset_2Dtransfer(BaseDataset):
+    def __init__(self, roi_size=256):
+        self.root = '/workspace/1.Hemorrhage/SMART-Net/datasets'
+        self.roi_size   = roi_size
+        self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Coreline_TEST_dcm/*/*'))
+        self.label_list = pd.read_csv('/workspace/1.Hemorrhage/SMART-Net/dataset/Coreline_1795_TEST_Label.csv')['Label'].values
+        self.transforms = get_transforms_3D_2Dtransfer(mode='test', roi_size=roi_size)
+
+    def __len__(self):
+        return len(self.image_list)
+
+    def __getitem__(self, index):
+        max_attempts = 100
+        for _ in range(max_attempts):
+            try:        
+                # image
+                image = extract_3D(self.image_list[index]).transpose(2, 0, 1) # D, H, W
+        
+                D, H, W = image.shape
+
+                # augmentation
+                augmented_images  = torch.empty((1, D, self.roi_size, self.roi_size), dtype=torch.float32)
+                first_image_slice = image[0, :, :]
+                sample = self.transforms(image=first_image_slice)
+                augmented_images[:, 0, :, :] = sample['image']
+                replay = sample['replay']
+                for d in range(1, D):
+                    slice_image = image[d, :, :]
+                    sample = A.ReplayCompose.replay(replay, image=slice_image)
+                    augmented_images[:, d, :, :] = sample["image"]
+                
+                # label                
+                label = torch.tensor([self.label_list[index]])
+
+                # image [B, 1, 512, 512], label [B, 1]
+                return self.image_list[index], augmented_images.float(), label.float(), D
+
+            except Exception as e:
+                print(f"Error in __getitem__ at path {self.image_list[index]}: {e}")
+                index = random.randint(0, len(self.image_list) - 1)
+
+class TEST_HEMO_3D_SEG_Dataset_2Dtransfer(BaseDataset):
+    def __init__(self, mode="train", roi_size=256):
+        self.root = '/workspace/1.Hemorrhage/SMART-Net/SMART-Net/datasets'
+        self.roi_size = roi_size
+        self.mode = mode
+        if mode == 'train':
+            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Train_nii/*_img.nii.gz'))  + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Coreline_1350/NIFTI_IMG/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Asan_internal/*_img.nii.gz'))
+            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Train_nii/*_mask.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Coreline_1350/NIFTI_SEGGT/*.nii.gz')) + list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Test_nii/Asan_internal/*_mask.nii.gz'))
+        else:
+            self.image_list = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_img.nii.gz'))
+            self.mask_list  = list_sort_nicely(glob.glob('/workspace/1.Hemorrhage/SMART-Net/dataset/Valid_nii/*_mask.nii.gz'))
+        
+        self.transforms = get_transforms_3D_2Dtransfer(mode=mode, roi_size=roi_size)
+        
+        self.image_list = self.image_list
+        self.mask_list = self.mask_list
+    def __len__(self):
+        return len(self.image_list)
+
+    def __getitem__(self, index):
+        max_attempts = 100
+        for _ in range(max_attempts):
+            try:        
+                # image
+                image = sitk.ReadImage(self.image_list[index])
+                image = sitk.GetArrayFromImage(image)  # D, H, W
+
+                # mask
+                mask = sitk.ReadImage(self.mask_list[index])
+                mask = sitk.GetArrayFromImage(mask)  # D, H, W
+        
+                D, H, W = image.shape
+
+                # augmentation
+                augmented_images  = torch.empty((1, D, self.roi_size, self.roi_size), dtype=torch.float32)
+                augmented_masks   = torch.empty((1, D, self.roi_size, self.roi_size), dtype=torch.float32)
+                first_image_slice = image[0, :, :]
+                first_mask_slice  = mask[0, :, :]
+                sample = self.transforms(image=first_image_slice, mask=first_mask_slice)
+                augmented_images[:, 0, :, :] = sample['image']
+                augmented_masks[:, 0, :, :]  = sample['mask']
+                replay = sample['replay']
+                for d in range(1, D):
+                    slice_image = image[d, :, :]
+                    slice_mask  = mask[d, :, :]
+                    sample = A.ReplayCompose.replay(replay, image=slice_image, mask=slice_mask)
+                    augmented_images[:, d, :, :] = sample["image"]
+                    augmented_masks[:, d, :, :]  = sample["mask"]
+
+                # image [B, 1, 512, 512], mask [B, 1, 512, 512]
+                return self.image_list[index], augmented_images.float(), augmented_masks.float(), D
+
+            except Exception as e:
+                print(f"Error in __getitem__ at path {self.image_list[index]}: {e}")
+                index = random.randint(0, len(self.image_list) - 1)
+
+
+
+def get_dataloader_test(name, batch_size, num_workers, roi_size, operator_3d):
+    # 2D
+    if name == 'coreline_dataset_test':            
+        test_dataset = TEST_HEMO_2D_MTL_Dataset(roi_size=roi_size)
+        print("TEST [Total] number = ", len(test_dataset))
+        data_loader   = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, collate_fn=functools.partial(TEST_2D_pad_collate_fn, roi_size=roi_size))
+    # 3D - 2D transfer
+    elif name == 'coreline_dataset_test_3d_cls': 
+        test_dataset = TEST_HEMO_3D_CLS_Dataset_2Dtransfer(roi_size=roi_size)
+        print("TEST [Total] number = ", len(test_dataset))
+        data_loader   = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, 
+                                    collate_fn=functools.partial(CLS_pad_collate_fn_LSTM, roi_size=roi_size) if operator_3d=='lstm' else functools.partial(CLS_pad_collate_fn_TR, roi_size=roi_size))
+
+    elif name == 'coreline_dataset_test_3d_seg':
+        test_dataset = HEMO_3D_SEG_Dataset_2Dtransfer(mode='test', roi_size=roi_size)
+        print("TEST [Total] number = ", len(test_dataset))
+        data_loader   = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False, 
+                                    collate_fn=functools.partial(SEG_pad_collate_fn_PAD, roi_size=roi_size))
+        
+    return data_loader

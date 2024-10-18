@@ -8,7 +8,7 @@ def get_model(args):
     
     # 2D: encoder with MTL
     if args.model == 'SMART-Net-2D':
-        model = SMART_Net_2D(backbone=args.backbone, use_skip=args.use_skip, pool_type=args.pool_type)
+        model = SMART_Net_2D(backbone=args.backbone, use_skip=args.use_skip, pool_type=args.pool_type, use_consist=args.use_consist, roi_size=args.roi_size)
     
     # 3D-CLS: 3D operator w/ 2D encoder
     elif args.model == 'SMART-Net-3D-CLS':
@@ -44,26 +44,3 @@ def get_model(args):
     print('Number of Learnable Params:', n_parameters)   
 
     return model
-
-
-# def test_get_model(name):
-    
-#     # 2D
-#     if name == 'EfficientNetB7_UNet_MTL_CLS_SEG_REC':
-#         model = EfficientNetB7_UNet_MTL_CLS_SEG_REC(pretrained=False)
-    
-#     elif name == 'MaxViT_UNet_MTL_CLS_SEG_REC':
-#         model = MaxViT_UNet_MTL_CLS_SEG_REC(pretrained=False)
-    
-#     # 3D - 2D transfer
-#     elif name == 'EfficientNetB7_LSTM':
-#         model = EfficientNetB7_LSTM(pretrained=False)
-
-#     elif name == 'MaxViT_LSTM':
-#         model = MaxViT_LSTM(pretrained=False)
-
-#     # print number of learnable parameters
-#     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-#     print('Number of Learnable Params:', n_parameters)   
-
-#     return model
